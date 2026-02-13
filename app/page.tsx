@@ -5,7 +5,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { quoteReducer } from '@/lib/cotizador/store'
 import { INITIAL_STATE } from '@/lib/cotizador/constants'
-import { calcularTodosLosPlanes, calcularAlaCarte } from '@/lib/cotizador/calculos'
+import { calcularTodosLosPlanes, calcularAlaCarte, calcularTotalesCotizacion } from '@/lib/cotizador/calculos'
 import type { SavedQuote } from '@/lib/cotizador/types'
 import { PanelControl } from '@/components/cotizador/panel-control'
 import { ResultadosSidebar } from '@/components/cotizador/resultados-sidebar'
@@ -61,12 +61,21 @@ export default function CotizadorPage() {
   // --- Cálculos (memoizados) ---
   const planes = useMemo(() => calcularTodosLosPlanes(state), [state])
   const alaCarteResult = useMemo(() => calcularAlaCarte(state), [state])
-  const planActual = planes[state.planSeleccionado]
+  const planActual = useMemo(() => {
+    if (state.modo !== 'PLANES') return null
+    if (!state.planSeleccionado) return null
+    return planes[state.planSeleccionado]
+  }, [planes, state.modo, state.planSeleccionado])
+
+  const totales = useMemo(
+    () => calcularTotalesCotizacion(state, planActual, alaCarteResult),
+    [state, planActual, alaCarteResult]
+  )
 
   // --- Warnings (guard rails) ---
   const warnings = useMemo(() => {
     const w: string[] = []
-    if (planActual.margenPorcentaje < 0) {
+    if (planActual && planActual.margenPorcentaje < 0) {
       w.push('Margen negativo: el descuento o los costos superan el ingreso.')
     }
     const totalCom =
@@ -180,6 +189,7 @@ export default function CotizadorPage() {
               <TabsContent value="planes">
                 <PlanesCapita
                   planes={planes}
+                  modo={state.modo}
                   planSeleccionado={state.planSeleccionado}
                   onSelectPlan={(plan) => dispatch({ type: 'SET_PLAN_SELECCIONADO', payload: plan })}
                 />
@@ -194,6 +204,7 @@ export default function CotizadorPage() {
                   state={state}
                   planResult={planActual}
                   alaCarteResult={alaCarteResult}
+                  totales={totales}
                   onSave={handleSave}
                   onDuplicate={handleDuplicate}
                 />
@@ -218,6 +229,8 @@ export default function CotizadorPage() {
               <ResultadosSidebar
                 planResult={planActual}
                 alaCarteResult={alaCarteResult}
+                totales={totales}
+                modo={state.modo}
                 planSeleccionado={state.planSeleccionado}
                 warnings={warnings}
               />

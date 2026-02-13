@@ -6,6 +6,7 @@ import type {
   PlanType,
   AlaCarteResult,
   FaceScanTier,
+  QuoteTotals,
 } from './types'
 import {
   FACESCAN_TIERS,
@@ -246,6 +247,59 @@ export function calcularAlaCarte(state: QuoteState): AlaCarteResult {
       transcripcionesMensual,
     },
     totalMensual,
+  }
+}
+
+/**
+ * Calcula los totales unificados de la cotización, respetando el modo:
+ * - PLANES: mensualPlan + mensualPaquetes
+ * - SOLO_PAQUETES: mensualPlan = 0, solo paquetes
+ *
+ * Nota UX: esto evita “sumas fantasma” cuando el vendedor quiere cotizar solo
+ * un paquete (ej. preventa FaceScan) sin plan.
+ */
+export function calcularTotalesCotizacion(
+  state: QuoteState,
+  planResult: PlanResult | null,
+  alaCarteResult: AlaCarteResult
+): QuoteTotals {
+  const pop = state.contrato.poblacion
+  const meses = Math.max(1, state.contrato.duracionMeses)
+
+  const mensualPaquetes = alaCarteResult.totalMensual
+
+  const mensualPlan =
+    state.modo === 'PLANES' && state.planSeleccionado && planResult
+      ? planResult.ingresoMensualConDescuento
+      : 0
+
+  const mensualTotal = mensualPlan + mensualPaquetes
+
+  const startFee = state.contrato.startFeeEnabled ? state.contrato.startFeeAmount : 0
+
+  const contratoTotal = mensualTotal * meses + startFee
+
+  const feePerCapitaTotal = pop > 0 ? mensualTotal / pop : 0
+
+  const comisionesPct =
+    state.preciosComisiones.comisionVentas +
+    (state.contrato.signerEnabled ? state.preciosComisiones.comisionSigner : 0)
+
+  const comisionesMensual = mensualTotal * comisionesPct
+  const comisionesContrato = comisionesMensual * meses
+
+  return {
+    mensualPlan,
+    mensualPaquetes,
+    mensualTotal,
+    contratoTotal,
+    feePerCapitaTotal,
+    planSeleccionado: state.planSeleccionado,
+    modo: state.modo,
+    startFee,
+    comisionesPct,
+    comisionesMensual,
+    comisionesContrato,
   }
 }
 

@@ -10,13 +10,15 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { DollarSign, TrendingUp, Users, FileText, Info } from 'lucide-react'
-import type { PlanResult, AlaCarteResult, PlanType } from '@/lib/cotizador/types'
+import type { PlanResult, AlaCarteResult, PlanType, QuoteTotals, QuoteMode } from '@/lib/cotizador/types'
 import { formatUSD, formatPercent } from '@/lib/cotizador/calculos'
 
 interface ResultadosSidebarProps {
-  planResult: PlanResult
+  planResult: PlanResult | null
   alaCarteResult: AlaCarteResult
-  planSeleccionado: PlanType
+  totales: QuoteTotals
+  modo: QuoteMode
+  planSeleccionado: PlanType | null
   warnings: string[]
 }
 
@@ -24,16 +26,18 @@ interface ResultadosSidebarProps {
 export function ResultadosSidebar({
   planResult,
   alaCarteResult,
+  totales,
+  modo,
   planSeleccionado,
   warnings,
 }: ResultadosSidebarProps) {
-  const totalMensualConAddons =
-    planResult.ingresoMensualConDescuento + alaCarteResult.totalMensual
-  const totalContratoConAddons =
-    planResult.facturaTotal + alaCarteResult.totalMensual * (planResult.facturaTotal / (planResult.ingresoMensualConDescuento || 1))
+  const totalMensual = totales.mensualTotal
+  const totalContrato = totales.contratoTotal
 
   const margenColor =
-    planResult.margenPorcentaje < 0
+    !planResult
+      ? 'bg-muted text-muted-foreground'
+      : planResult.margenPorcentaje < 0
       ? 'bg-destructive text-destructive-foreground'
       : planResult.margenPorcentaje < 0.15
         ? 'bg-warning text-warning-foreground'
@@ -48,7 +52,7 @@ export function ResultadosSidebar({
             Resultados
           </CardTitle>
           <Badge variant="outline" className="border-primary/30 text-primary font-semibold">
-            {planSeleccionado}
+            {modo === 'SOLO_PAQUETES' ? 'Solo Paquetes' : planSeleccionado ? planSeleccionado : 'Sin plan'}
           </Badge>
         </div>
       </CardHeader>
@@ -70,7 +74,7 @@ export function ResultadosSidebar({
             </Tooltip>
           </TooltipProvider>
           <p className="text-2xl font-bold text-foreground tracking-tight">
-            {formatUSD(planResult.feePerCapita)}
+            {formatUSD(totales.feePerCapitaTotal)}
           </p>
         </div>
 
@@ -81,13 +85,11 @@ export function ResultadosSidebar({
             Factura Mensual
           </div>
           <p className="text-xl font-bold text-foreground">
-            {formatUSD(planResult.ingresoMensualConDescuento)}
+            {formatUSD(totalMensual)}
           </p>
-          {alaCarteResult.totalMensual > 0 && (
-            <p className="text-xs text-muted-foreground mt-0.5">
-              + {formatUSD(alaCarteResult.totalMensual)} add-ons = {formatUSD(totalMensualConAddons)}
-            </p>
-          )}
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Plan: {formatUSD(totales.mensualPlan)} · Paquetes: {formatUSD(totales.mensualPaquetes)}
+          </p>
         </div>
 
         <Separator />
@@ -99,11 +101,11 @@ export function ResultadosSidebar({
             Total Contrato
           </div>
           <p className="text-xl font-bold text-foreground">
-            {formatUSD(planResult.facturaTotal)}
+            {formatUSD(totalContrato)}
           </p>
-          {alaCarteResult.totalMensual > 0 && (
+          {totales.startFee > 0 && (
             <p className="text-xs text-muted-foreground mt-0.5">
-              Con add-ons: {formatUSD(totalContratoConAddons)}
+              Incluye Start Fee: {formatUSD(totales.startFee)}
             </p>
           )}
         </div>
@@ -114,24 +116,25 @@ export function ResultadosSidebar({
         <div className="flex flex-col gap-2">
           <div className="flex items-center justify-between">
             <span className="text-xs text-muted-foreground">Utilidad Bruta (Arche)</span>
-            <span className="text-sm font-semibold">{formatUSD(planResult.utilidadBrutaMensual)}/mes</span>
+            <span className="text-sm font-semibold">
+              {planResult ? `${formatUSD(planResult.utilidadBrutaMensual)}/mes` : '—'}
+            </span>
           </div>
           <div className="flex items-center justify-between">
             <span className="text-xs text-muted-foreground">Margen</span>
             <Badge className={`${margenColor} text-xs`}>
-              {formatPercent(planResult.margenPorcentaje)}
+              {planResult ? formatPercent(planResult.margenPorcentaje) : '—'}
             </Badge>
           </div>
           <div className="flex items-center justify-between">
             <span className="text-xs text-muted-foreground">Comisión Ventas</span>
-            <span className="text-sm font-medium">{formatUSD(planResult.comisionVentasUSD)}/mes</span>
+            <span className="text-sm font-medium">{formatUSD(totales.comisionesMensual)}/mes</span>
           </div>
-          {planResult.comisionSignerUSD > 0 && (
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">Comisión Firmante</span>
-              <span className="text-sm font-medium">{formatUSD(planResult.comisionSignerUSD)}/mes</span>
-            </div>
-          )}
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground">Comisiones (total)</span>
+            <span className="text-sm font-medium">{formatPercent(totales.comisionesPct)}
+            </span>
+          </div>
         </div>
 
         {/* Advertencias */}

@@ -6,6 +6,9 @@ export type Segmento = 'municipio' | 'cooperativa' | 'empresa' | 'otro'
 /** Tipos de plan */
 export type PlanType = 'BASE' | 'PLUS' | 'FULL'
 
+/** Modo de cotización */
+export type QuoteMode = 'PLANES' | 'SOLO_PAQUETES'
+
 /** Presets de incidencia */
 export type IncidenciaPreset = 'conservador' | 'estandar' | 'moderado' | 'agresivo'
 
@@ -55,7 +58,16 @@ export interface QuoteState {
   planDesign: PlanDesign
   costosBase: CostosBase
   preciosComisiones: PreciosComisiones
-  planSeleccionado: PlanType
+  /**
+   * En modo PLANES puede ser un plan (BASE/PLUS/FULL) o null (sin plan).
+   * En modo SOLO_PAQUETES debe ser null.
+   */
+  planSeleccionado: PlanType | null
+  /**
+   * PLANES: cotiza un plan por cápita y opcionalmente suma paquetes.
+   * SOLO_PAQUETES: cotiza únicamente Telemed/FaceScan/Zentis (sin plan).
+   */
+  modo: QuoteMode
   // A la carta
   alaCartaTelemed: AlaCartaTelemed
   alaCartaFaceScan: AlaCartaFaceScan
@@ -152,4 +164,30 @@ export interface AlaCarteResult {
     transcripcionesMensual: number
   }
   totalMensual: number
+}
+
+/** Totales unificados de la cotización (para UI / PDF) */
+export interface QuoteTotals {
+  /** Total mensual facturado al cliente (plan + paquetes según modo) */
+  mensualTotal: number
+  /** Total del contrato completo */
+  contratoTotal: number
+  /** Fee efectivo por vida/mes (total mensual / población) */
+  feePerCapitaTotal: number
+  /** Total mensual sólo del plan (0 en SOLO_PAQUETES o sin plan) */
+  mensualPlan: number
+  /** Total mensual sólo de paquetes */
+  mensualPaquetes: number
+  /** Plan aplicado (puede ser null) */
+  planSeleccionado: PlanType | null
+  /** Modo */
+  modo: QuoteMode
+  /** Start fee aplicado (0 si no aplica) */
+  startFee: number
+  /** Porcentaje total de comisiones (ventas + firmante si corresponde) */
+  comisionesPct: number
+  /** Comisiones estimadas sobre el total mensual facturado */
+  comisionesMensual: number
+  /** Comisiones estimadas sobre todo el contrato */
+  comisionesContrato: number
 }

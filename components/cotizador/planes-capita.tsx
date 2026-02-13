@@ -18,13 +18,14 @@ import {
   AlertTriangle,
   Info,
 } from 'lucide-react'
-import type { PlanResult, PlanType } from '@/lib/cotizador/types'
+import type { PlanResult, PlanType, QuoteMode } from '@/lib/cotizador/types'
 import { formatUSD, formatPercent } from '@/lib/cotizador/calculos'
 
 interface PlanesCapitaProps {
   planes: Record<PlanType, PlanResult>
-  planSeleccionado: PlanType
-  onSelectPlan: (plan: PlanType) => void
+  modo: QuoteMode
+  planSeleccionado: PlanType | null
+  onSelectPlan: (plan: PlanType | null) => void
 }
 
 const PLAN_CONFIG: Record<PlanType, {
@@ -79,11 +80,13 @@ function PlanCard({
   result,
   isSelected,
   onSelect,
+  disabled,
 }: {
   planType: PlanType
   result: PlanResult
   isSelected: boolean
   onSelect: () => void
+  disabled: boolean
 }) {
   const config = PLAN_CONFIG[planType]
   const Icon = config.icon
@@ -100,11 +103,15 @@ function PlanCard({
   return (
     <Card
       className={`relative overflow-hidden transition-all ${
-        isSelected
-          ? `${config.borderColor} border-2 shadow-lg ring-2 ring-primary/20`
-          : 'border hover:shadow-md cursor-pointer'
+        disabled
+          ? 'border opacity-50'
+          : isSelected
+            ? `${config.borderColor} border-2 shadow-lg ring-2 ring-primary/20`
+            : 'border hover:shadow-md cursor-pointer'
       }`}
-      onClick={onSelect}
+      onClick={() => {
+        if (!disabled) onSelect()
+      }}
     >
       {/* Gradiente de fondo */}
       <div className={`absolute inset-0 bg-gradient-to-br ${config.gradient} pointer-events-none`} />
@@ -197,12 +204,13 @@ function PlanCard({
           variant={isSelected ? 'default' : 'outline'}
           size="sm"
           className="w-full mt-1"
+          disabled={disabled}
           onClick={(e) => {
             e.stopPropagation()
-            onSelect()
+            if (!disabled) onSelect()
           }}
         >
-          {isSelected ? 'Plan Seleccionado' : 'Seleccionar Plan'}
+          {disabled ? 'No aplica en este modo' : isSelected ? 'Plan Seleccionado' : 'Seleccionar Plan'}
         </Button>
       </CardContent>
     </Card>
@@ -210,7 +218,9 @@ function PlanCard({
 }
 
 /** Tab de Planes por Cápita */
-export function PlanesCapita({ planes, planSeleccionado, onSelectPlan }: PlanesCapitaProps) {
+export function PlanesCapita({ planes, modo, planSeleccionado, onSelectPlan }: PlanesCapitaProps) {
+  const disabled = modo === 'SOLO_PAQUETES'
+
   return (
     <div className="flex flex-col gap-4">
       <div>
@@ -218,6 +228,24 @@ export function PlanesCapita({ planes, planSeleccionado, onSelectPlan }: PlanesC
         <p className="text-sm text-muted-foreground">
           Compara los tres niveles de plan y selecciona el que mejor se adapte a tu cliente.
         </p>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button
+            variant={planSeleccionado ? 'outline' : 'default'}
+            size="sm"
+            disabled={disabled}
+            onClick={() => onSelectPlan(null)}
+          >
+            Sin plan
+          </Button>
+        </div>
+
+        {disabled && (
+          <p className="mt-2 text-sm text-muted-foreground">
+            Estás en <b>Solo Paquetes</b>. Los planes quedan desactivados para evitar sumas automáticas.
+          </p>
+        )}
+
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -228,6 +256,7 @@ export function PlanesCapita({ planes, planSeleccionado, onSelectPlan }: PlanesC
             result={planes[pt]}
             isSelected={planSeleccionado === pt}
             onSelect={() => onSelectPlan(pt)}
+            disabled={disabled}
           />
         ))}
       </div>

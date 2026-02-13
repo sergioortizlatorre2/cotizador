@@ -33,7 +33,7 @@ import {
   Info,
   Zap,
 } from 'lucide-react'
-import type { QuoteState, Segmento, IncidenciaPreset } from '@/lib/cotizador/types'
+import type { QuoteState, Segmento, IncidenciaPreset, QuoteMode } from '@/lib/cotizador/types'
 import type { QuoteAction } from '@/lib/cotizador/store'
 import { INCIDENCIA_PRESETS } from '@/lib/cotizador/constants'
 
@@ -92,6 +92,33 @@ export function PanelControl({ state, dispatch }: PanelControlProps) {
 
   return (
     <div className="flex flex-col gap-4">
+      {/* Modo de cotización */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <Zap className="h-4 w-4 text-primary" />
+            Modo de Cotización
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-2">
+          <Label className="text-xs text-muted-foreground">
+            Elegí cómo se arma el precio: plan por cápita o solo paquetes
+          </Label>
+          <Select
+            value={state.modo}
+            onValueChange={(v) => dispatch({ type: 'SET_MODO', payload: v as QuoteMode })}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="PLANES">Planes (por cápita) + Paquetes opcionales</SelectItem>
+              <SelectItem value="SOLO_PAQUETES">Solo Paquetes (Telemed / FaceScan / Zentis)</SelectItem>
+            </SelectContent>
+          </Select>
+        </CardContent>
+      </Card>
+
       {/* Quick Presets */}
       <Card>
         <CardHeader className="pb-2">
@@ -169,10 +196,10 @@ export function PanelControl({ state, dispatch }: PanelControlProps) {
               </Label>
               <Input
                 type="number"
-                min={1}
+                min={0}
                 value={contrato.poblacion}
                 onChange={(e) =>
-                  dispatch({ type: 'SET_POBLACION', payload: parseInt(e.target.value) || 1 })
+                  dispatch({ type: 'SET_POBLACION', payload: parseInt(e.target.value) || 0 })
                 }
                 className="mt-1"
               />

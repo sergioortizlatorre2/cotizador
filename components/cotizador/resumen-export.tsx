@@ -19,14 +19,15 @@ import {
   Package,
   ClipboardCheck,
 } from 'lucide-react'
-import type { QuoteState, PlanResult, AlaCarteResult, SavedQuote } from '@/lib/cotizador/types'
+import type { QuoteState, PlanResult, AlaCarteResult, QuoteTotals } from '@/lib/cotizador/types'
 import { formatUSD, formatPercent } from '@/lib/cotizador/calculos'
 import { toast } from 'sonner'
 
 interface ResumenExportProps {
   state: QuoteState
-  planResult: PlanResult
+  planResult: PlanResult | null
   alaCarteResult: AlaCarteResult
+  totales: QuoteTotals
   onSave: () => void
   onDuplicate: () => void
 }
@@ -43,14 +44,15 @@ export function ResumenExport({
   state,
   planResult,
   alaCarteResult,
+  totales,
   onSave,
   onDuplicate,
 }: ResumenExportProps) {
   const printRef = useRef<HTMLDivElement>(null)
   const { contrato, planDesign, preciosComisiones } = state
 
-  const totalMensualConAddons =
-    planResult.ingresoMensualConDescuento + alaCarteResult.totalMensual
+  const totalMensual = totales.mensualTotal
+  const etiquetaPlan = state.modo === 'SOLO_PAQUETES' ? 'Solo Paquetes' : state.planSeleccionado || 'Sin plan'
 
   // --- Compartir vía URL ---
   const handleShareLink = useCallback(() => {
@@ -117,7 +119,7 @@ export function ResumenExport({
             <div class="item"><span class="item-label">Segmento</span><span class="item-value">${SEGMENTO_LABELS[contrato.segmento]}</span></div>
             <div class="item"><span class="item-label">Población</span><span class="item-value">${contrato.poblacion.toLocaleString()} vidas</span></div>
             <div class="item"><span class="item-label">Duración</span><span class="item-value">${contrato.duracionMeses} meses</span></div>
-            <div class="item"><span class="item-label">Plan</span><span class="item-value"><span class="plan-badge">${state.planSeleccionado}</span></span></div>
+            <div class="item"><span class="item-label">Plan / Modo</span><span class="item-value"><span class="plan-badge">${etiquetaPlan}</span></span></div>
           </div>
         </div>
 
@@ -125,21 +127,21 @@ export function ResumenExport({
           <div style="display:flex;justify-content:space-between;align-items:center;">
             <div>
               <div style="color:#666;font-size:11px;">Fee Per Cápita / mes</div>
-              <div class="big-number">${formatUSD(planResult.feePerCapita)}</div>
+              <div class="big-number">${formatUSD(totales.feePerCapitaTotal)}</div>
             </div>
             <div style="text-align:right;">
               <div style="color:#666;font-size:11px;">Factura Mensual</div>
-              <div style="font-size:20px;font-weight:700;">${formatUSD(planResult.ingresoMensualConDescuento)}</div>
+              <div style="font-size:20px;font-weight:700;">${formatUSD(totales.mensualTotal)}</div>
             </div>
           </div>
         </div>
 
         <div class="section">
           <div class="section-title">Resumen Financiero</div>
-          <div class="item"><span class="item-label">Factura Mensual (Plan)</span><span class="item-value">${formatUSD(planResult.ingresoMensualConDescuento)}</span></div>
-          ${alaCarteResult.totalMensual > 0 ? `<div class="item"><span class="item-label">Add-ons Mensual</span><span class="item-value">${formatUSD(alaCarteResult.totalMensual)}</span></div>` : ''}
-          ${alaCarteResult.totalMensual > 0 ? `<div class="item"><span class="item-label">Total Mensual</span><span class="item-value">${formatUSD(totalMensualConAddons)}</span></div>` : ''}
-          <div class="item"><span class="item-label">Total Contrato</span><span class="item-value" style="font-size:16px;color:#1a9a8a;">${formatUSD(planResult.facturaTotal)}</span></div>
+          ${totales.mensualPlan > 0 ? `<div class="item"><span class="item-label">Factura Mensual (Plan)</span><span class="item-value">${formatUSD(totales.mensualPlan)}</span></div>` : ''}
+          ${totales.mensualPaquetes > 0 ? `<div class="item"><span class="item-label">Paquetes / Add-ons (Mensual)</span><span class="item-value">${formatUSD(totales.mensualPaquetes)}</span></div>` : ''}
+          <div class="item"><span class="item-label">Total Mensual</span><span class="item-value">${formatUSD(totales.mensualTotal)}</span></div>
+          <div class="item"><span class="item-label">Total Contrato</span><span class="item-value" style="font-size:16px;color:#1a9a8a;">${formatUSD(totales.contratoTotal)}</span></div>
           ${contrato.startFeeEnabled ? `<div class="item"><span class="item-label">Start Fee</span><span class="item-value">${formatUSD(contrato.startFeeAmount)}</span></div>` : ''}
         </div>
 
@@ -174,7 +176,7 @@ export function ResumenExport({
     setTimeout(() => {
       printWindow.print()
     }, 500)
-  }, [state, contrato, planDesign, planResult, alaCarteResult, totalMensualConAddons, preciosComisiones])
+  }, [state, contrato, planDesign, planResult, alaCarteResult, totales, preciosComisiones, etiquetaPlan])
 
   return (
     <div className="flex flex-col gap-6">
@@ -216,30 +218,36 @@ export function ResumenExport({
           </CardContent>
         </Card>
 
-        {/* Plan seleccionado */}
+        {/* Plan / Modo */}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm">
               <ClipboardCheck className="h-4 w-4 text-primary" />
-              Plan Seleccionado
-              <Badge className="ml-auto">{state.planSeleccionado}</Badge>
+              Plan / Modo
+              <Badge className="ml-auto">{etiquetaPlan}</Badge>
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-3 gap-4">
               <div className="rounded-xl bg-primary/5 p-4 text-center">
                 <p className="text-xs text-muted-foreground mb-1">Per Cápita / mes</p>
-                <p className="text-2xl font-bold text-foreground">{formatUSD(planResult.feePerCapita)}</p>
+                <p className="text-2xl font-bold text-foreground">{formatUSD(totales.feePerCapitaTotal)}</p>
               </div>
               <div className="rounded-xl bg-muted/50 p-4 text-center">
                 <p className="text-xs text-muted-foreground mb-1">Factura Mensual</p>
-                <p className="text-2xl font-bold text-foreground">{formatUSD(planResult.ingresoMensualConDescuento)}</p>
+                <p className="text-2xl font-bold text-foreground">{formatUSD(totales.mensualTotal)}</p>
               </div>
               <div className="rounded-xl bg-muted/50 p-4 text-center">
                 <p className="text-xs text-muted-foreground mb-1">Total Contrato</p>
-                <p className="text-2xl font-bold text-foreground">{formatUSD(planResult.facturaTotal)}</p>
+                <p className="text-2xl font-bold text-foreground">{formatUSD(totales.contratoTotal)}</p>
               </div>
             </div>
+
+            {(!planResult || state.modo === 'SOLO_PAQUETES' || !state.planSeleccionado) && (
+              <p className="mt-3 text-sm text-muted-foreground">
+                Esta cotización no incluye un plan por cápita. El total se compone de paquetes y/o upsells seleccionados.
+              </p>
+            )}
           </CardContent>
         </Card>
 
@@ -294,32 +302,22 @@ export function ResumenExport({
             <div className="grid grid-cols-2 gap-x-6 gap-y-2">
               <div className="flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">Utilidad Bruta</span>
-                <span className="font-medium">{formatUSD(planResult.utilidadBrutaMensual)}/mes</span>
+                <span className="font-medium">{planResult ? `${formatUSD(planResult.utilidadBrutaMensual)}/mes` : '—'}</span>
               </div>
               <div className="flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">Margen</span>
-                <Badge
-                  className={
-                    planResult.margenPorcentaje < 0
-                      ? 'bg-destructive text-destructive-foreground'
-                      : planResult.margenPorcentaje < 0.15
-                        ? 'bg-warning text-warning-foreground'
-                        : 'bg-success text-success-foreground'
-                  }
-                >
-                  {formatPercent(planResult.margenPorcentaje)}
+                <Badge className={planResult ? (planResult.margenPorcentaje < 0 ? 'bg-destructive text-destructive-foreground' : planResult.margenPorcentaje < 0.15 ? 'bg-warning text-warning-foreground' : 'bg-success text-success-foreground') : 'bg-muted text-muted-foreground'}>
+                  {planResult ? formatPercent(planResult.margenPorcentaje) : '—'}
                 </Badge>
               </div>
               <div className="flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">Comisión Ventas</span>
-                <span className="font-medium">{formatUSD(planResult.comisionVentasUSD)}/mes</span>
+                <span className="font-medium">{formatUSD(totales.comisionesMensual)}/mes</span>
               </div>
-              {planResult.comisionSignerUSD > 0 && (
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Comisión Firmante</span>
-                  <span className="font-medium">{formatUSD(planResult.comisionSignerUSD)}/mes</span>
-                </div>
-              )}
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Comisiones (total)</span>
+                <span className="font-medium">{formatPercent(totales.comisionesPct)}</span>
+              </div>
             </div>
           </CardContent>
         </Card>
