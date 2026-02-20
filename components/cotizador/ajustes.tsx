@@ -133,7 +133,7 @@ export function Ajustes({
             <p className="font-medium text-foreground text-sm">Arche Salud - Cotizador Comercial v1.0</p>
             <p>Herramienta de uso interno para representantes de ventas.</p>
             <p>Los datos se almacenan localmente en el navegador.</p>
-            <p>Los costos base mostrados son valores enmascarados (2x del costo real).</p>
+            <p>.</p>
           </div>
         </CardContent>
       </Card>
