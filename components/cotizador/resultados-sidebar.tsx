@@ -12,6 +12,7 @@ import {
 import { DollarSign, TrendingUp, Users, FileText, Info } from 'lucide-react'
 import type { PlanResult, AlaCarteResult, PlanType, QuoteTotals, QuoteMode } from '@/lib/cotizador/types'
 import { formatUSD, formatPercent } from '@/lib/cotizador/calculos'
+import { useRole } from '@/lib/auth/useRole'
 
 interface ResultadosSidebarProps {
   planResult: PlanResult | null
@@ -25,12 +26,16 @@ interface ResultadosSidebarProps {
 /** Panel lateral sticky con resumen de resultados */
 export function ResultadosSidebar({
   planResult,
-  alaCarteResult,
   totales,
   modo,
   planSeleccionado,
   warnings,
 }: ResultadosSidebarProps) {
+  const role = useRole()
+  const showArche = role === 'admin'
+  const showCommissions = role === 'admin' || role === 'sales'
+  const showWarnings = role !== 'public'
+
   const totalMensual = totales.mensualTotal
   const totalContrato = totales.contratoTotal
 
@@ -38,15 +43,15 @@ export function ResultadosSidebar({
     !planResult
       ? 'bg-muted text-muted-foreground'
       : planResult.margenPorcentaje < 0
-      ? 'bg-destructive text-destructive-foreground'
-      : planResult.margenPorcentaje < 0.15
-        ? 'bg-warning text-warning-foreground'
-        : 'bg-success text-success-foreground'
+        ? 'bg-destructive text-destructive-foreground'
+        : planResult.margenPorcentaje < 0.15
+          ? 'bg-warning text-warning-foreground'
+          : 'bg-success text-success-foreground'
 
   return (
     <Card className="border-primary/20 shadow-md">
       <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <CardTitle className="flex items-center gap-2 text-base">
             <TrendingUp className="h-4 w-4 text-primary" />
             Resultados
@@ -56,8 +61,9 @@ export function ResultadosSidebar({
           </Badge>
         </div>
       </CardHeader>
+
       <CardContent className="flex flex-col gap-4">
-        {/* Per Cápita */}
+        {/* Fee */}
         <div className="rounded-xl bg-primary/5 p-4">
           <TooltipProvider>
             <Tooltip>
@@ -69,11 +75,11 @@ export function ResultadosSidebar({
                 </div>
               </TooltipTrigger>
               <TooltipContent>
-                <p>Ingreso mensual dividido entre la población total.</p>
+                <p>Ingreso mensual dividido entre la población (para lectura comercial).</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
-          <p className="text-2xl font-bold text-foreground tracking-tight">
+          <p className="text-2xl font-bold text-foreground tracking-tight tabular-nums">
             {formatUSD(totales.feePerCapitaTotal)}
           </p>
         </div>
@@ -84,7 +90,7 @@ export function ResultadosSidebar({
             <DollarSign className="h-3 w-3" />
             Factura Mensual
           </div>
-          <p className="text-xl font-bold text-foreground">
+          <p className="text-xl font-bold text-foreground tabular-nums">
             {formatUSD(totalMensual)}
           </p>
           <p className="text-xs text-muted-foreground mt-0.5">
@@ -100,7 +106,7 @@ export function ResultadosSidebar({
             <FileText className="h-3 w-3" />
             Total Contrato
           </div>
-          <p className="text-xl font-bold text-foreground">
+          <p className="text-xl font-bold text-foreground tabular-nums">
             {formatUSD(totalContrato)}
           </p>
           {totales.startFee > 0 && (
@@ -110,35 +116,51 @@ export function ResultadosSidebar({
           )}
         </div>
 
-        <Separator />
+        {(showArche || showCommissions) && (
+          <>
+            <Separator />
 
-        {/* Utilidad y Comisiones */}
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-muted-foreground">Utilidad Bruta (Arche)</span>
-            <span className="text-sm font-semibold">
-              {planResult ? `${formatUSD(planResult.utilidadBrutaMensual)}/mes` : '—'}
-            </span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-muted-foreground">Margen</span>
-            <Badge className={`${margenColor} text-xs`}>
-              {planResult ? formatPercent(planResult.margenPorcentaje) : '—'}
-            </Badge>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-muted-foreground">Comisión Ventas</span>
-            <span className="text-sm font-medium">{formatUSD(totales.comisionesMensual)}/mes</span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-muted-foreground">Comisiones (total)</span>
-            <span className="text-sm font-medium">{formatPercent(totales.comisionesPct)}
-            </span>
-          </div>
-        </div>
+            <div className="flex flex-col gap-2">
+              {showArche && (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">Utilidad Bruta (Arche)</span>
+                    <span className="text-sm font-semibold tabular-nums">
+                      {planResult ? `${formatUSD(planResult.utilidadBrutaMensual)}/mes` : '—'}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">Margen</span>
+                    <Badge className={`${margenColor} text-xs`}>
+                      {planResult ? formatPercent(planResult.margenPorcentaje) : '—'}
+                    </Badge>
+                  </div>
+                </>
+              )}
+
+              {showCommissions && (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">Comisiones</span>
+                    <span className="text-sm font-medium tabular-nums">
+                      {formatUSD(totales.comisionesMensual)}/mes
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">Comisiones (%)</span>
+                    <span className="text-sm font-medium tabular-nums">
+                      {formatPercent(totales.comisionesPct)}
+                    </span>
+                  </div>
+                </>
+              )}
+            </div>
+          </>
+        )}
 
         {/* Advertencias */}
-        {warnings.length > 0 && (
+        {showWarnings && warnings.length > 0 && (
           <>
             <Separator />
             <div className="flex flex-col gap-1.5">

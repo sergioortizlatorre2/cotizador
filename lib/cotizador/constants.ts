@@ -7,7 +7,7 @@ import type { FaceScanTier, QuoteState, IncidenciaPreset } from './types'
  * La app usa "Base Cost = realCost * 2" como costo base editable.
  */
 const COSTOS_REALES = {
-  telemed: 3.5,
+  telemed: 1.5,
   faceScan: 0.75,
   mantenimiento: 0.5,
   medico: 2.0,
@@ -16,11 +16,11 @@ const COSTOS_REALES = {
 
 /** Costos base por defecto (realCost * 2) */
 export const COSTOS_BASE_DEFAULT = {
-  costoBaseTelemed: COSTOS_REALES.telemed * 2,
-  costoBaseFaceScan: COSTOS_REALES.faceScan * 2,
-  mantenimientoPorVida: COSTOS_REALES.mantenimiento * 2,
-  costoMedicoPorVida: COSTOS_REALES.medico * 2,
-  costoAPPorVida: COSTOS_REALES.ap * 2,
+  costoBaseTelemed: COSTOS_REALES.telemed,
+  costoBaseFaceScan: COSTOS_REALES.faceScan,
+  mantenimientoPorVida: COSTOS_REALES.mantenimiento,
+  costoMedicoPorVida: COSTOS_REALES.medico * 1.3,
+  costoAPPorVida: COSTOS_REALES.ap * 1.3,
 }
 
 /** Presets de incidencia */
@@ -54,6 +54,14 @@ export const ZENTIS_TIERS = [
 export const ZENTIS_IMAGENES_PRECIO = 80 // USD por usuario/mes
 export const ZENTIS_TRANSCRIPCION_PRECIO = 1 // USD por transcripción
 
+/**
+ * Fee fijo mensual (soporte/operación)
+ * - Si la población total es menor al umbral, se cobra un fee fijo mensual.
+ * - Si supera el umbral, se asume incluido en el producto (fee = 0).
+ */
+export const FEE_FIJO_SOPORTE_MENSUAL_USD = 2000
+export const FEE_FIJO_SOPORTE_UMBRAL_SIN_FEE = 10000
+
 /** Tiers default de Telemed a la carta */
 export const TELEMED_TIERS_DEFAULT = [
   { minQty: 1, precioUnitario: COSTOS_BASE_DEFAULT.costoBaseTelemed * 2 },
@@ -76,8 +84,8 @@ export const INITIAL_STATE: QuoteState = {
     signerEnabled: false,
   },
   planDesign: {
-    telemedIncluidoPorVida: 0,
-    faceScanIncluidoPorVida: 0,
+    telemedIncluidoPorVida: 1,
+    faceScanIncluidoPorVida: 1,
     incidenciaMensual: 0.12,
     scansPorEvento: 1,
   },

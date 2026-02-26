@@ -1,11 +1,16 @@
 'use client'
 
+import { RoleSwitcher } from '@/components/auth/rolesSwitcher'
 import { useReducer, useMemo, useState, useEffect, useCallback } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { quoteReducer } from '@/lib/cotizador/store'
 import { INITIAL_STATE } from '@/lib/cotizador/constants'
-import { calcularTodosLosPlanes, calcularAlaCarte, calcularTotalesCotizacion } from '@/lib/cotizador/calculos'
+import {
+  calcularTodosLosPlanes,
+  calcularAlaCarte,
+  calcularTotalesCotizacion,
+} from '@/lib/cotizador/calculos'
 import type { SavedQuote } from '@/lib/cotizador/types'
 import { PanelControl } from '@/components/cotizador/panel-control'
 import { ResultadosSidebar } from '@/components/cotizador/resultados-sidebar'
@@ -42,7 +47,6 @@ export default function CotizadorPage() {
   useEffect(() => {
     setSavedQuotes(loadSavedQuotes())
 
-    // Cargar estado de URL si existe
     const params = new URLSearchParams(window.location.search)
     const q = params.get('q')
     if (q) {
@@ -50,10 +54,9 @@ export default function CotizadorPage() {
         const decoded = JSON.parse(atob(decodeURIComponent(q)))
         dispatch({ type: 'LOAD_STATE', payload: decoded })
         toast.success('Cotización cargada desde enlace')
-        // Limpiar URL
         window.history.replaceState({}, '', window.location.pathname)
       } catch {
-        // URL inválida, ignorar
+        // ignorar
       }
     }
   }, [])
@@ -61,6 +64,7 @@ export default function CotizadorPage() {
   // --- Cálculos (memoizados) ---
   const planes = useMemo(() => calcularTodosLosPlanes(state), [state])
   const alaCarteResult = useMemo(() => calcularAlaCarte(state), [state])
+
   const planActual = useMemo(() => {
     if (state.modo !== 'PLANES') return null
     if (!state.planSeleccionado) return null
@@ -88,7 +92,12 @@ export default function CotizadorPage() {
       w.push('Incidencia atípica: mayor al 20%.')
     }
     return w
-  }, [planActual, state.preciosComisiones, state.contrato.signerEnabled, state.planDesign.incidenciaMensual])
+  }, [
+    planActual,
+    state.preciosComisiones,
+    state.contrato.signerEnabled,
+    state.planDesign.incidenciaMensual,
+  ])
 
   // --- Acciones de cotización ---
   const handleSave = useCallback(() => {
@@ -134,7 +143,7 @@ export default function CotizadorPage() {
     <div className="min-h-screen bg-background">
       {/* Header */}
       <header className="border-b bg-card">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
+        <div className="mx-auto flex w-full max-w-[1600px] items-center justify-between px-4 py-3 lg:px-6">
           <div className="flex items-center gap-3">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
               <Activity className="h-4 w-4 text-primary-foreground" />
@@ -144,28 +153,30 @@ export default function CotizadorPage() {
               <p className="text-[11px] text-muted-foreground leading-tight">Cotizador Comercial</p>
             </div>
           </div>
-          <p className="text-xs text-muted-foreground hidden sm:block">
-            {state.contrato.nombreCliente
-              ? state.contrato.nombreCliente
-              : 'Sin cliente seleccionado'}
-          </p>
+          <div className="flex items-center gap-3">
+            <p className="text-xs text-muted-foreground hidden sm:block">
+              {state.contrato.nombreCliente ? state.contrato.nombreCliente : 'Sin cliente seleccionado'}
+            </p>
+            <RoleSwitcher />
+          </div>
         </div>
       </header>
 
-      {/* Main layout */}
-      <main className="mx-auto max-w-7xl px-4 py-6">
-        <div className="flex flex-col gap-6 lg:flex-row">
-          {/* Left: Inputs (Panel de Control) */}
-          <aside className="w-full lg:w-80 flex-shrink-0">
+      {/* Main layout: ahora usa ancho real + grid */}
+      <main className="mx-auto w-full max-w-[1600px] px-4 py-6 lg:px-6">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[360px_minmax(0,1fr)_360px]">
+          {/* Left: Inputs */}
+          <aside className="min-w-0">
             <div className="lg:sticky lg:top-6">
-              <ScrollArea className="lg:max-h-[calc(100vh-120px)]">
+              {/* Altura fija para que siempre haya scroll en el panel */}
+              <ScrollArea className="h-[calc(100vh-140px)] pr-3">
                 <PanelControl state={state} dispatch={dispatch} />
               </ScrollArea>
             </div>
           </aside>
 
-          {/* Center: Tabs content */}
-          <div className="flex-1 min-w-0">
+          {/* Center */}
+          <div className="min-w-0">
             <Tabs value={activeTab} onValueChange={setActiveTab}>
               <TabsList className="mb-4 w-full grid grid-cols-4">
                 <TabsTrigger value="planes" className="gap-1.5 text-xs">
@@ -187,12 +198,15 @@ export default function CotizadorPage() {
               </TabsList>
 
               <TabsContent value="planes">
-                <PlanesCapita
-                  planes={planes}
-                  modo={state.modo}
-                  planSeleccionado={state.planSeleccionado}
-                  onSelectPlan={(plan) => dispatch({ type: 'SET_PLAN_SELECCIONADO', payload: plan })}
-                />
+              <PlanesCapita
+                planes={planes}
+                modo={state.modo}
+                planSeleccionado={state.planSeleccionado}
+                onSelectPlan={(plan) => dispatch({ type: 'SET_PLAN_SELECCIONADO', payload: plan })}
+                segmento={state.contrato.segmento}
+                poblacion={state.contrato.poblacion}
+                incidenciaMensual={state.planDesign.incidenciaMensual}
+              />
               </TabsContent>
 
               <TabsContent value="alacarta">
@@ -223,8 +237,8 @@ export default function CotizadorPage() {
             </Tabs>
           </div>
 
-          {/* Right: Resultados (sticky sidebar) */}
-          <aside className="w-full lg:w-72 flex-shrink-0">
+          {/* Right: Resultados */}
+          <aside className="min-w-0">
             <div className="lg:sticky lg:top-6">
               <ResultadosSidebar
                 planResult={planActual}
@@ -238,7 +252,6 @@ export default function CotizadorPage() {
           </aside>
         </div>
       </main>
-      
     </div>
   )
 }

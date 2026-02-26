@@ -4,46 +4,38 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
-import {
-  Check,
-  Shield,
-  ShieldPlus,
-  ShieldCheck,
-  AlertTriangle,
-  Info,
-} from 'lucide-react'
-import type { PlanResult, PlanType, QuoteMode } from '@/lib/cotizador/types'
-import { formatUSD, formatPercent } from '@/lib/cotizador/calculos'
+import { Check, Shield, ShieldPlus, ShieldCheck } from 'lucide-react'
+import type { PlanResult, PlanType, QuoteMode, Segmento } from '@/lib/cotizador/types'
+import { formatUSD } from '@/lib/cotizador/calculos'
+import { useRole } from '@/lib/auth/useRole'
 
 interface PlanesCapitaProps {
   planes: Record<PlanType, PlanResult>
   modo: QuoteMode
   planSeleccionado: PlanType | null
   onSelectPlan: (plan: PlanType | null) => void
+
+  // Para mostrar fee "amigable" en Municipio/Cooperativa
+  segmento: Segmento
+  poblacion: number
+  incidenciaMensual: number
 }
 
-const PLAN_CONFIG: Record<PlanType, {
-  label: string
-  description: string
-  includes: string[]
-  icon: typeof Shield
-  gradient: string
-  borderColor: string
-}> = {
+const PLAN_CONFIG: Record<
+  PlanType,
+  {
+    label: string
+    description: string
+    includes: string[]
+    icon: typeof Shield
+    gradient: string
+    borderColor: string
+  }
+> = {
   BASE: {
     label: 'BASE',
     description: 'Mantenimiento + Telemed + FaceScan',
-    includes: [
-      'Mantenimiento plataforma',
-      'Telemedicina incluida',
-      'FaceScan incluido',
-    ],
+    includes: ['Mantenimiento plataforma', 'Telemedicina incluida', 'FaceScan incluido'],
     icon: Shield,
     gradient: 'from-muted/50 to-muted/20',
     borderColor: 'border-border',
@@ -51,11 +43,7 @@ const PLAN_CONFIG: Record<PlanType, {
   PLUS: {
     label: 'PLUS',
     description: 'BASE + Médico Capitado',
-    includes: [
-      'Todo lo de BASE',
-      'Médico capitado por vida',
-      'Cobertura médica mensual',
-    ],
+    includes: ['Todo lo de BASE', 'Médico capitado por vida', 'Cobertura médica mensual'],
     icon: ShieldPlus,
     gradient: 'from-primary/5 to-primary/0',
     borderColor: 'border-primary/30',
@@ -63,15 +51,32 @@ const PLAN_CONFIG: Record<PlanType, {
   FULL: {
     label: 'FULL',
     description: 'PLUS + Accidentes Personales',
-    includes: [
-      'Todo lo de PLUS',
-      'Accidentes Personales (AP)',
-      'Cobertura integral',
-    ],
+    includes: ['Todo lo de PLUS', 'Accidentes Personales (AP)', 'Cobertura integral'],
     icon: ShieldCheck,
     gradient: 'from-primary/10 to-primary/5',
     borderColor: 'border-primary',
   },
+}
+
+function MetricRow({
+  label,
+  value,
+}: {
+  label: string
+  value: string
+}) {
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="text-sm font-semibold tabular-nums text-right leading-snug whitespace-nowrap">
+        {value}
+      </p>
+    </div>
+  )
+}
+
+function isActuarialSegment(seg: Segmento) {
+  return seg === 'municipio' || seg === 'cooperativa'
 }
 
 /** Tarjeta individual de plan */
@@ -81,24 +86,40 @@ function PlanCard({
   isSelected,
   onSelect,
   disabled,
+  segmento,
+  poblacion,
+  incidenciaMensual,
 }: {
   planType: PlanType
   result: PlanResult
   isSelected: boolean
   onSelect: () => void
   disabled: boolean
+
+  segmento: Segmento
+  poblacion: number
+  incidenciaMensual: number
 }) {
+  const role = useRole()
+  const showArche = role === 'admin'
+
   const config = PLAN_CONFIG[planType]
   const Icon = config.icon
 
-  const margenColor =
-    result.margenPorcentaje < 0
-      ? 'bg-destructive text-destructive-foreground'
-      : result.margenPorcentaje < 0.15
-        ? 'bg-warning text-warning-foreground'
-        : 'bg-success text-success-foreground'
+  const actuarial = isActuarialSegment(segmento)
+  const pop = Math.max(0, poblacion)
+  const inc = Math.max(0, Math.min(1, incidenciaMensual))
+  const vidasCobradas = actuarial ? pop * inc : pop
 
-  const hasOverage = result.excedenteTelemed > 0 || result.excedenteFaceScan > 0
+  // Fee visible:
+  // - Empresa/Otro: fee per cápita real
+  // - Municipio/Cooperativa: mostrar fee "por vida total" = factura / población total
+  const feeVisible =
+    actuarial && pop > 0
+      ? result.ingresoMensualConDescuento / pop
+      : result.feePerCapita
+
+  const feeLabel = actuarial ? 'Fee por vida total / mes' : 'Per Cápita / mes'
 
   return (
     <Card
@@ -113,7 +134,6 @@ function PlanCard({
         if (!disabled) onSelect()
       }}
     >
-      {/* Gradiente de fondo */}
       <div className={`absolute inset-0 bg-gradient-to-br ${config.gradient} pointer-events-none`} />
 
       {isSelected && (
@@ -133,34 +153,40 @@ function PlanCard({
       </CardHeader>
 
       <CardContent className="relative flex flex-col gap-3">
-        {/* Per Cápita - tipografía grande */}
+        {/* Fee principal */}
         <div className="rounded-xl bg-background/80 p-3">
-          <p className="text-xs text-muted-foreground mb-0.5">Per Cápita / mes</p>
-          <p className="text-3xl font-bold tracking-tight text-foreground">
-            {formatUSD(result.feePerCapita)}
+          <p className="text-xs text-muted-foreground mb-0.5">{feeLabel}</p>
+          <p className="text-3xl font-bold tracking-tight text-foreground tabular-nums whitespace-nowrap">
+            {formatUSD(feeVisible)}
           </p>
+
+          {actuarial && (
+            <p className="mt-1 text-[11px] text-muted-foreground leading-snug">
+              Se factura el {Math.round(inc * 100)}% ({Math.round(vidasCobradas).toLocaleString('en-US')} vidas).
+              Fee sobre vidas cobradas: <b>{formatUSD(result.feePerCapita)}</b>
+            </p>
+          )}
         </div>
 
         {/* Métricas */}
-        <div className="grid grid-cols-2 gap-2">
-          <div>
-            <p className="text-xs text-muted-foreground">Factura Mensual</p>
-            <p className="text-sm font-semibold">{formatUSD(result.ingresoMensualConDescuento)}</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">Total Contrato</p>
-            <p className="text-sm font-semibold">{formatUSD(result.facturaTotal)}</p>
-          </div>
-        </div>
+        <div className="rounded-xl border bg-background/70 p-3 flex flex-col gap-2 min-w-0">
+          <MetricRow label="Factura mensual" value={formatUSD(result.ingresoMensualConDescuento)} />
+          <MetricRow label="Total contrato" value={formatUSD(result.facturaTotal)} />
 
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-xs text-muted-foreground">Utilidad Bruta</p>
-            <p className="text-sm font-semibold">{formatUSD(result.utilidadBrutaMensual)}/mes</p>
-          </div>
-          <Badge className={`${margenColor} text-xs`}>
-            {formatPercent(result.margenPorcentaje)}
-          </Badge>
+          {showArche && (
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs text-muted-foreground">Utilidad bruta (Arche)</p>
+                <p className="text-sm font-semibold tabular-nums leading-snug whitespace-nowrap">
+                  {formatUSD(result.utilidadBrutaMensual)}{' '}
+                  <span className="text-xs text-muted-foreground">/mes</span>
+                </p>
+              </div>
+              <Badge className="text-xs flex-shrink-0" variant="secondary">
+                {(result.margenPorcentaje * 100).toFixed(1)}%
+              </Badge>
+            </div>
+          )}
         </div>
 
         <Separator />
@@ -168,38 +194,13 @@ function PlanCard({
         {/* Incluidos */}
         <div className="flex flex-col gap-1.5">
           {config.includes.map((item) => (
-            <div key={item} className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Check className="h-3 w-3 text-primary flex-shrink-0" />
-              {item}
+            <div key={item} className="flex items-start gap-2 text-xs text-muted-foreground">
+              <Check className="h-3 w-3 text-primary flex-shrink-0 mt-0.5" />
+              <span className="min-w-0 break-words">{item}</span>
             </div>
           ))}
         </div>
 
-        {/* Indicador de excedentes */}
-        {hasOverage && (
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className="flex items-center gap-1.5 rounded-lg bg-warning/10 px-3 py-2 cursor-help">
-                  <AlertTriangle className="h-3.5 w-3.5 text-warning flex-shrink-0" />
-                  <span className="text-xs text-warning font-medium">
-                    Riesgo de excedente
-                  </span>
-                  <Info className="h-3 w-3 text-warning/60 ml-auto" />
-                </div>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" className="max-w-xs text-xs">
-                <p>
-                  Excedente estimado (no facturado):
-                  {result.excedenteTelemed > 0 && ` ${Math.round(result.excedenteTelemed)} telemed`}
-                  {result.excedenteFaceScan > 0 && ` / ${Math.round(result.excedenteFaceScan)} scans`}
-                </p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        )}
-
-        {/* Botón de selección */}
         <Button
           variant={isSelected ? 'default' : 'outline'}
           size="sm"
@@ -217,8 +218,15 @@ function PlanCard({
   )
 }
 
-/** Tab de Planes por Cápita */
-export function PlanesCapita({ planes, modo, planSeleccionado, onSelectPlan }: PlanesCapitaProps) {
+export function PlanesCapita({
+  planes,
+  modo,
+  planSeleccionado,
+  onSelectPlan,
+  segmento,
+  poblacion,
+  incidenciaMensual,
+}: PlanesCapitaProps) {
   const disabled = modo === 'SOLO_PAQUETES'
 
   return (
@@ -245,7 +253,6 @@ export function PlanesCapita({ planes, modo, planSeleccionado, onSelectPlan }: P
             Estás en <b>Solo Paquetes</b>. Los planes quedan desactivados para evitar sumas automáticas.
           </p>
         )}
-
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -257,6 +264,9 @@ export function PlanesCapita({ planes, modo, planSeleccionado, onSelectPlan }: P
             isSelected={planSeleccionado === pt}
             onSelect={() => onSelectPlan(pt)}
             disabled={disabled}
+            segmento={segmento}
+            poblacion={poblacion}
+            incidenciaMensual={incidenciaMensual}
           />
         ))}
       </div>
