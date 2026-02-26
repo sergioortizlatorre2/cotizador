@@ -1,4 +1,4 @@
-// Motor de cálculos del cotizador
+// lib/cotizador/calculos.ts
 
 import type {
   QuoteState,
@@ -26,8 +26,7 @@ function isActuarialSegment(segmento: string) {
 }
 
 /**
- * Redondeo comercial (ej: 0.5 => .00 / .50)
- * mode='up' protege margen
+ * Redondeo comercial
  */
 function roundToStep(value: number, step = 0.25, mode: 'nearest' | 'up' = 'up'): number {
   if (!Number.isFinite(value)) return 0
@@ -37,46 +36,119 @@ function roundToStep(value: number, step = 0.25, mode: 'nearest' | 'up' = 'up'):
   return rounded * step
 }
 
-/**
- * Vidas cobradas:
- * - Empresa/Otro: toda la población
- * - Municipio/Cooperativa: población * preset (incidenciaMensual como % facturable)
- */
-function getVidasCobradas(state: QuoteState) {
-  const pop = Math.max(0, state.contrato.poblacion)
-  const inc = clamp01(state.planDesign.incidenciaMensual)
-  const actuarial = isActuarialSegment(state.contrato.segmento)
-  const vidasCobradas = actuarial ? pop * inc : pop
-  return { pop, inc, actuarial, vidasCobradas }
-}
-
-/**
- * Fee fijo mensual de soporte/operación (automático)
- * - Si la población total < umbral => se cobra fee fijo.
- * - Si la población total >= umbral => fee 0 (incluido).
- */
 function calcularFeeFijoSoporteMensual(popTotal: number) {
   if (popTotal <= 0) return 0
   return popTotal < FEE_FIJO_SOPORTE_UMBRAL_SIN_FEE ? FEE_FIJO_SOPORTE_MENSUAL_USD : 0
 }
 
+function getTotalComisionPct(state: QuoteState) {
+  return (
+    state.preciosComisiones.comisionVentas +
+    (state.contrato.signerEnabled ? state.preciosComisiones.comisionSigner : 0)
+  )
+}
+
+function grossUpAndDiscount(netAmount: number, state: QuoteState) {
+  const totalComisionPct = getTotalComisionPct(state)
+  const denominator = Math.max(1 - totalComisionPct, 0.01)
+  const grossed = netAmount / denominator
+  return grossed * (1 - state.preciosComisiones.descuentoComercial)
+}
+
 /**
- * Calcula el FEE "base empresa" (por vida) SIN importar el segmento.
- * Esto asegura que en municipio/cooperativa el fee por vida cobrada sea igual al de empresa.
- *
- * Supuesto empresa:
- * - costos fijos por toda la población
- * - costos variables por uso esperado = pop * incidencia
- * - el fee se divide SIEMPRE por pop
+ * Telemed a la carta:
+ * - base real = costo telemed * markupCore
+ * - tiers aplican un FACTOR relativo respecto del primer tier cargado en UI
+ * - luego se hace gross-up de comisiones + firmante y descuento comercial
  */
-function calcularFeeBaseEmpresa(state: QuoteState, planType: PlanType) {
+export function getTelemedAlaCarteBasePrice(state: QuoteState): number {
+  const netBase = state.costosBase.costoBaseTelemed * state.preciosComisiones.markupCore
+  return roundToStep(grossUpAndDiscount(netBase, state), 0.25, 'up')
+}
+
+export function getTelemedTierFactor(
+  cantidad: number,
+  tiers: { minQty: number; precioUnitario: number }[]
+): number {
+  const ordered = [...tiers].sort((a, b) => a.minQty - b.minQty)
+  const baseRef = ordered[0]?.precioUnitario ?? 1
+  let selectedRef = baseRef
+
+  for (const tier of ordered) {
+    if (cantidad >= tier.minQty) {
+      selectedRef = tier.precioUnitario
+    }
+  }
+
+  if (!Number.isFinite(baseRef) || baseRef <= 0) return 1
+  const factor = selectedRef / baseRef
+  return factor > 0 ? factor : 1
+}
+
+export function getTelemedAlaCartePrice(
+  cantidad: number,
+  tiers: { minQty: number; precioUnitario: number }[],
+  state: QuoteState
+): number {
+  const basePrice = getTelemedAlaCarteBasePrice(state)
+  const factor = getTelemedTierFactor(cantidad, tiers)
+  return roundToStep(basePrice * factor, 0.25, 'up')
+}
+
+export function getFaceScanTierPrice(
+  scansAnuales: number,
+  tiers: FaceScanTier[] = FACESCAN_TIERS
+): number {
+  let precio = tiers[0].precioUnitario
+  for (const tier of tiers) {
+    if (scansAnuales >= tier.minScans) {
+      precio = tier.precioUnitario
+    }
+  }
+  return precio
+}
+
+export function getFaceScanQuotedUnitPrice(state: QuoteState, scansAnuales: number): number {
+  const basePrice = getFaceScanTierPrice(scansAnuales)
+  return roundToStep(grossUpAndDiscount(basePrice, state), 0.25, 'up')
+}
+
+export function getZentisTierPrice(usuarios: number): number {
+  for (const tier of ZENTIS_TIERS) {
+    if (usuarios >= tier.minUsers && usuarios <= tier.maxUsers) {
+      return tier.precioUsuario
+    }
+  }
+  return ZENTIS_TIERS[ZENTIS_TIERS.length - 1].precioUsuario
+}
+
+export function getZentisQuotedUnitPrice(state: QuoteState, usuarios: number): number {
+  const basePrice = getZentisTierPrice(usuarios)
+  return roundToStep(grossUpAndDiscount(basePrice, state), 0.25, 'up')
+}
+
+export function getZentisImagenesQuotedUnitPrice(state: QuoteState): number {
+  return roundToStep(grossUpAndDiscount(ZENTIS_IMAGENES_PRECIO, state), 0.25, 'up')
+}
+
+export function getZentisTranscripcionQuotedUnitPrice(state: QuoteState): number {
+  return roundToStep(grossUpAndDiscount(ZENTIS_TRANSCRIPCION_PRECIO, state), 0.25, 'up')
+}
+
+/**
+ * Cálculo BASE EMPRESA:
+ * - costos fijos sobre toda la población
+ * - costos variables sobre población * incidencia
+ * - fee dividido por toda la población
+ * Este resultado es la "base comercial" que luego se capita en municipio/cooperativa.
+ */
+function calcularPlanBaseEmpresa(state: QuoteState, planType: PlanType): PlanResult {
   const { contrato, planDesign, costosBase, preciosComisiones } = state
 
   const pop = Math.max(0, contrato.poblacion)
   const inc = clamp01(planDesign.incidenciaMensual)
   const mesesContrato = Math.max(1, contrato.duracionMeses)
 
-  // Uso esperado (empresa): una parte usa el servicio
   const vidasActivas = pop * inc
 
   const telemedEsperado = vidasActivas * planDesign.telemedIncluidoPorVida
@@ -86,100 +158,53 @@ function calcularFeeBaseEmpresa(state: QuoteState, planType: PlanType) {
   const costoTelemedMensual = telemedEsperado * costosBase.costoBaseTelemed
   const costoFaceScanMensual = faceScanEsperado * costosBase.costoBaseFaceScan
 
-  // Costos fijos por toda la población
   const costoMantenimientoMensual = pop * costosBase.mantenimientoPorVida
   const costoMedicoMensual =
-    planType === 'PLUS' || planType === 'FULL' ? pop * costosBase.costoMedicoPorVida : 0
-  const costoAPMensual = planType === 'FULL' ? pop * costosBase.costoAPPorVida : 0
+    planType === 'PLUS' || planType === 'FULL'
+      ? pop * costosBase.costoMedicoPorVida
+      : 0
+  const costoAPMensual =
+    planType === 'FULL'
+      ? pop * costosBase.costoAPPorVida
+      : 0
 
   const costoCoreMensual =
-    costoMantenimientoMensual + costoTelemedMensual + costoFaceScanMensual + costoMedicoMensual
+    costoMantenimientoMensual +
+    costoTelemedMensual +
+    costoFaceScanMensual +
+    costoMedicoMensual
+
   const costoTotalMensual = costoCoreMensual + costoAPMensual
 
-  // Reserva prorrateada
   const reservaMensual = contrato.reservaEnabled
     ? (costoTotalMensual * contrato.reservaMeses) / mesesContrato
     : 0
 
-  // Gross-up comisiones
   const apConMargen = costoAPMensual * (1 + preciosComisiones.margenAP)
-  const numerador = costoCoreMensual * preciosComisiones.markupCore + apConMargen + reservaMensual
 
-  const totalComision =
-    preciosComisiones.comisionVentas + (contrato.signerEnabled ? preciosComisiones.comisionSigner : 0)
+  const numerador =
+    costoCoreMensual * preciosComisiones.markupCore + apConMargen + reservaMensual
 
-  const denominador = Math.max(1 - totalComision, 0.01)
+  const totalComisionPct = getTotalComisionPct(state)
+  const denominador = Math.max(1 - totalComisionPct, 0.01)
   const ingresoMensualRaw = numerador / denominador
 
-  // Descuento comercial
-  const ingresoMensualConDescuentoRaw = ingresoMensualRaw * (1 - preciosComisiones.descuentoComercial)
+  const ingresoMensualConDescuentoRaw =
+    ingresoMensualRaw * (1 - preciosComisiones.descuentoComercial)
 
-  // Fee empresa: divide por pop
-  const feeRaw = pop > 0 ? ingresoMensualConDescuentoRaw / pop : 0
-  const fee = roundToStep(feeRaw, 0.25, 'up')
+  const feePerCapitaRaw = pop > 0 ? ingresoMensualConDescuentoRaw / pop : 0
+  const feePerCapita = roundToStep(feePerCapitaRaw, 0.25, 'up')
 
-  return { feePerCapita: fee }
-}
-
-/**
- * Calcula los resultados para un tipo de plan dado.
- *
- * Regla clave de segmento:
- * - El FEE por vida (feePerCapita) es el mismo que en empresa (misma lógica de pricing).
- * - Lo único que cambia es la base de facturación (vidasCobradas):
- *    - Empresa/Otro: pop
- *    - Municipio/Cooperativa: pop * incidencia
- */
-export function calcularPlan(state: QuoteState, planType: PlanType): PlanResult {
-  const { contrato, planDesign, costosBase, preciosComisiones } = state
-  const mesesContrato = Math.max(1, contrato.duracionMeses)
-
-  const { pop, inc, actuarial, vidasCobradas } = getVidasCobradas(state)
-
-  // ✅ Fee SIEMPRE igual al de empresa
-  const { feePerCapita } = calcularFeeBaseEmpresa(state, planType)
-
-  // Fee fijo soporte (automático)
   const feeFijoSoporteMensual = calcularFeeFijoSoporteMensual(pop)
 
-  // ✅ Facturación
-  const ingresoPlanSinFeeFijo = feePerCapita * vidasCobradas
+  const ingresoPlanSinFeeFijo = feePerCapita * pop
   const ingresoMensualConDescuento = ingresoPlanSinFeeFijo + feeFijoSoporteMensual
 
-  // Ingreso "antes de descuento" consistente: el descuento aplica al componente per cápita,
-  // el fee fijo soporte se mantiene (no se descuenta automáticamente).
   const factorDescuento = 1 - preciosComisiones.descuentoComercial
-  const ingresoMensual = (factorDescuento > 0 ? ingresoPlanSinFeeFijo / factorDescuento : ingresoPlanSinFeeFijo) + feeFijoSoporteMensual
+  const ingresoMensual =
+    (factorDescuento > 0 ? ingresoPlanSinFeeFijo / factorDescuento : ingresoPlanSinFeeFijo) +
+    feeFijoSoporteMensual
 
-  /**
-   * COSTEO para margen:
-   * - Empresa: fijos sobre pop, variables sobre pop*inc (uso)
-   * - Municipio/Cooperativa: fijos y variables sobre vidasCobradas
-   */
-  const vidasFijasCosteo = actuarial ? vidasCobradas : pop
-  const vidasUsoCosteo = actuarial ? vidasCobradas : pop * inc
-
-  const telemedEsperado = vidasUsoCosteo * planDesign.telemedIncluidoPorVida
-  const faceScanEsperado = vidasUsoCosteo * planDesign.faceScanIncluidoPorVida * planDesign.scansPorEvento
-
-  const costoTelemedMensual = telemedEsperado * costosBase.costoBaseTelemed
-  const costoFaceScanMensual = faceScanEsperado * costosBase.costoBaseFaceScan
-
-  const costoMantenimientoMensual = vidasFijasCosteo * costosBase.mantenimientoPorVida
-  const costoMedicoMensual =
-    planType === 'PLUS' || planType === 'FULL' ? vidasFijasCosteo * costosBase.costoMedicoPorVida : 0
-  const costoAPMensual = planType === 'FULL' ? vidasFijasCosteo * costosBase.costoAPPorVida : 0
-
-  const costoCoreMensual =
-    costoMantenimientoMensual + costoTelemedMensual + costoFaceScanMensual + costoMedicoMensual
-  const costoTotalMensual = costoCoreMensual + costoAPMensual
-
-  // Reserva prorrateada (sobre costo real del segmento)
-  const reservaMensual = contrato.reservaEnabled
-    ? (costoTotalMensual * contrato.reservaMeses) / mesesContrato
-    : 0
-
-  // Comisiones USD (sobre el ingreso final, incluyendo fee fijo)
   const comisionVentasUSD = ingresoMensualConDescuento * preciosComisiones.comisionVentas
   const comisionSignerUSD = contrato.signerEnabled
     ? ingresoMensualConDescuento * preciosComisiones.comisionSigner
@@ -192,10 +217,14 @@ export function calcularPlan(state: QuoteState, planType: PlanType): PlanResult 
     comisionVentasUSD -
     comisionSignerUSD
 
-  const margenPorcentaje = ingresoMensualConDescuento > 0 ? utilidadBrutaMensual / ingresoMensualConDescuento : 0
+  const margenPorcentaje =
+    ingresoMensualConDescuento > 0
+      ? utilidadBrutaMensual / ingresoMensualConDescuento
+      : 0
 
   const facturaTotal =
-    ingresoMensualConDescuento * mesesContrato + (contrato.startFeeEnabled ? contrato.startFeeAmount : 0)
+    ingresoMensualConDescuento * mesesContrato +
+    (contrato.startFeeEnabled ? contrato.startFeeAmount : 0)
 
   return {
     planType,
@@ -220,9 +249,80 @@ export function calcularPlan(state: QuoteState, planType: PlanType): PlanResult 
   }
 }
 
-/**
- * Calcula los 3 planes a la vez.
- */
+export function calcularPlan(state: QuoteState, planType: PlanType): PlanResult {
+  const empresaBase = calcularPlanBaseEmpresa(state, planType)
+
+  if (!isActuarialSegment(state.contrato.segmento)) {
+    return empresaBase
+  }
+
+  const inc = clamp01(state.planDesign.incidenciaMensual)
+  const mesesContrato = Math.max(1, state.contrato.duracionMeses)
+  const pop = Math.max(0, state.contrato.poblacion)
+
+  const feeFijoSoporteMensual = calcularFeeFijoSoporteMensual(pop)
+
+  const ingresoPlanSinFeeFijo = empresaBase.feePerCapita * pop * inc
+  const ingresoMensualConDescuento = ingresoPlanSinFeeFijo + feeFijoSoporteMensual
+
+  const factorDescuento = 1 - state.preciosComisiones.descuentoComercial
+  const ingresoMensual =
+    (factorDescuento > 0 ? ingresoPlanSinFeeFijo / factorDescuento : ingresoPlanSinFeeFijo) +
+    feeFijoSoporteMensual
+
+  const costoTelemedMensual = empresaBase.costoTelemedMensual * inc
+  const costoFaceScanMensual = empresaBase.costoFaceScanMensual * inc
+  const costoMantenimientoMensual = empresaBase.costoMantenimientoMensual * inc
+  const costoMedicoMensual = empresaBase.costoMedicoMensual * inc
+  const costoAPMensual = empresaBase.costoAPMensual * inc
+  const costoCoreMensual = empresaBase.costoCoreMensual * inc
+  const costoTotalMensual = empresaBase.costoTotalMensual * inc
+  const reservaMensual = empresaBase.reservaMensual * inc
+
+  const comisionVentasUSD = ingresoMensualConDescuento * state.preciosComisiones.comisionVentas
+  const comisionSignerUSD = state.contrato.signerEnabled
+    ? ingresoMensualConDescuento * state.preciosComisiones.comisionSigner
+    : 0
+
+  const utilidadBrutaMensual =
+    ingresoMensualConDescuento -
+    costoTotalMensual -
+    reservaMensual -
+    comisionVentasUSD -
+    comisionSignerUSD
+
+  const margenPorcentaje =
+    ingresoMensualConDescuento > 0
+      ? utilidadBrutaMensual / ingresoMensualConDescuento
+      : 0
+
+  const facturaTotal =
+    ingresoMensualConDescuento * mesesContrato +
+    (state.contrato.startFeeEnabled ? state.contrato.startFeeAmount : 0)
+
+  return {
+    planType,
+    costoTelemedMensual,
+    costoFaceScanMensual,
+    costoMantenimientoMensual,
+    costoMedicoMensual,
+    costoAPMensual,
+    costoCoreMensual,
+    costoTotalMensual,
+    reservaMensual,
+    ingresoMensual,
+    ingresoMensualConDescuento,
+    feePerCapita: empresaBase.feePerCapita,
+    facturaTotal,
+    comisionVentasUSD,
+    comisionSignerUSD,
+    utilidadBrutaMensual,
+    margenPorcentaje,
+    excedenteTelemed: 0,
+    excedenteFaceScan: 0,
+  }
+}
+
 export function calcularTodosLosPlanes(state: QuoteState): Record<PlanType, PlanResult> {
   return {
     BASE: calcularPlan(state, 'BASE'),
@@ -231,86 +331,42 @@ export function calcularTodosLosPlanes(state: QuoteState): Record<PlanType, Plan
   }
 }
 
-/**
- * Obtiene el tier de precio de FaceScan según volumen anual.
- */
-export function getFaceScanTierPrice(
-  scansAnuales: number,
-  tiers: FaceScanTier[] = FACESCAN_TIERS
-): number {
-  let precio = tiers[0].precioUnitario
-  for (const tier of tiers) {
-    if (scansAnuales >= tier.minScans) {
-      precio = tier.precioUnitario
-    }
-  }
-  return precio
-}
-
-/**
- * Obtiene el precio por usuario de Zentis Assistant según cantidad.
- */
-export function getZentisTierPrice(usuarios: number): number {
-  for (const tier of ZENTIS_TIERS) {
-    if (usuarios >= tier.minUsers && usuarios <= tier.maxUsers) {
-      return tier.precioUsuario
-    }
-  }
-  return ZENTIS_TIERS[ZENTIS_TIERS.length - 1].precioUsuario
-}
-
-/**
- * Obtiene el precio unitario de Telemed a la carta según cantidad.
- */
-export function getTelemedAlaCartePrice(
-  cantidad: number,
-  tiers: { minQty: number; precioUnitario: number }[]
-): number {
-  let precio = tiers[0]?.precioUnitario ?? 0
-  for (const tier of tiers) {
-    if (cantidad >= tier.minQty) {
-      precio = tier.precioUnitario
-    }
-  }
-  return precio
-}
-
-/**
- * Calcula los totales de productos a la carta.
- */
 export function calcularAlaCarte(state: QuoteState): AlaCarteResult {
   const { alaCartaTelemed, alaCartaFaceScan, alaCartaZentis } = state
 
-  // Telemed a la carta
   let telemedUnitPrice = 0
   let telemedTotal = 0
   if (alaCartaTelemed.enabled) {
-    telemedUnitPrice = getTelemedAlaCartePrice(alaCartaTelemed.cantidadMensual, alaCartaTelemed.tiers)
+    telemedUnitPrice = getTelemedAlaCartePrice(
+      alaCartaTelemed.cantidadMensual,
+      alaCartaTelemed.tiers,
+      state
+    )
     telemedTotal = alaCartaTelemed.cantidadMensual * telemedUnitPrice
   }
 
-  // FaceScan a la carta
   let faceScanUnitPrice = 0
   let faceScanTotal = 0
   if (alaCartaFaceScan.enabled) {
-    faceScanUnitPrice = getFaceScanTierPrice(alaCartaFaceScan.scansAnuales)
+    faceScanUnitPrice = getFaceScanQuotedUnitPrice(state, alaCartaFaceScan.scansAnuales)
     faceScanTotal = (alaCartaFaceScan.scansAnuales / 12) * faceScanUnitPrice
   }
 
-  // Zentis
   let assistantMensual = 0
   let imagenesMensual = 0
   let transcripcionesMensual = 0
   if (alaCartaZentis.enabled) {
-    const precioAssistant = getZentisTierPrice(alaCartaZentis.usuariosActivos)
+    const precioAssistant = getZentisQuotedUnitPrice(state, alaCartaZentis.usuariosActivos)
     assistantMensual = alaCartaZentis.usuariosActivos * precioAssistant
 
     if (alaCartaZentis.zentisImagenes) {
-      imagenesMensual = alaCartaZentis.zentisImagenesUsuarios * ZENTIS_IMAGENES_PRECIO
+      imagenesMensual =
+        alaCartaZentis.zentisImagenesUsuarios * getZentisImagenesQuotedUnitPrice(state)
     }
 
     if (alaCartaZentis.transcripciones) {
-      transcripcionesMensual = alaCartaZentis.transcripcionesCantidad * ZENTIS_TRANSCRIPCION_PRECIO
+      transcripcionesMensual =
+        alaCartaZentis.transcripcionesCantidad * getZentisTranscripcionQuotedUnitPrice(state)
     }
   }
 
@@ -332,18 +388,14 @@ export function calcularAlaCarte(state: QuoteState): AlaCarteResult {
   }
 }
 
-/**
- * Calcula los totales unificados de la cotización.
- */
 export function calcularTotalesCotizacion(
   state: QuoteState,
   planResult: PlanResult | null,
   alaCarteResult: AlaCarteResult
 ): QuoteTotals {
-  const pop = Math.max(1, state.contrato.poblacion)
   const meses = Math.max(1, state.contrato.duracionMeses)
-
   const mensualPaquetes = alaCarteResult.totalMensual
+
   const mensualPlan =
     state.modo === 'PLANES' && state.planSeleccionado && planResult
       ? planResult.ingresoMensualConDescuento
@@ -353,13 +405,10 @@ export function calcularTotalesCotizacion(
   const startFee = state.contrato.startFeeEnabled ? state.contrato.startFeeAmount : 0
   const contratoTotal = mensualTotal * meses + startFee
 
-  // Fee efectivo por vida total (siempre sobre población total para lectura comercial)
+  const pop = Math.max(1, state.contrato.poblacion)
   const feePerCapitaTotal = mensualTotal / pop
 
-  const comisionesPct =
-    state.preciosComisiones.comisionVentas +
-    (state.contrato.signerEnabled ? state.preciosComisiones.comisionSigner : 0)
-
+  const comisionesPct = getTotalComisionPct(state)
   const comisionesMensual = mensualTotal * comisionesPct
   const comisionesContrato = comisionesMensual * meses
 
@@ -378,9 +427,6 @@ export function calcularTotalesCotizacion(
   }
 }
 
-/**
- * Formatea un número como moneda USD.
- */
 export function formatUSD(value: number): string {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -390,9 +436,6 @@ export function formatUSD(value: number): string {
   }).format(value)
 }
 
-/**
- * Formatea un número como porcentaje.
- */
 export function formatPercent(value: number): string {
   return `${(value * 100).toFixed(1)}%`
 }

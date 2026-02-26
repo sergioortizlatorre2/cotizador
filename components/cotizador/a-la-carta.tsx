@@ -31,7 +31,18 @@ import {
   ZENTIS_IMAGENES_PRECIO,
   ZENTIS_TRANSCRIPCION_PRECIO,
 } from '@/lib/cotizador/constants'
-import { formatUSD, getTelemedAlaCartePrice, getFaceScanTierPrice, getZentisTierPrice } from '@/lib/cotizador/calculos'
+import {
+  formatUSD,
+  getTelemedAlaCartePrice,
+  getTelemedAlaCarteBasePrice,
+  getTelemedTierFactor,
+  getFaceScanTierPrice,
+  getFaceScanQuotedUnitPrice,
+  getZentisTierPrice,
+  getZentisQuotedUnitPrice,
+  getZentisImagenesQuotedUnitPrice,
+  getZentisTranscripcionQuotedUnitPrice,
+} from '@/lib/cotizador/calculos'
 
 interface ALaCartaProps {
   state: QuoteState
@@ -39,9 +50,17 @@ interface ALaCartaProps {
   result: AlaCarteResult
 }
 
-/** Tab de A la Carta (Upsells) */
 export function ALaCarta({ state, dispatch, result }: ALaCartaProps) {
   const { alaCartaTelemed, alaCartaFaceScan, alaCartaZentis } = state
+
+  const telemedBaseCalculado = getTelemedAlaCarteBasePrice(state)
+  const telemedFactorAplicado = getTelemedTierFactor(
+    alaCartaTelemed.cantidadMensual,
+    alaCartaTelemed.tiers
+  )
+  const zentisAssistantUnit = getZentisQuotedUnitPrice(state, alaCartaZentis.usuariosActivos)
+  const zentisImagenesUnit = getZentisImagenesQuotedUnitPrice(state)
+  const zentisTranscripcionUnit = getZentisTranscripcionQuotedUnitPrice(state)
 
   return (
     <div className="flex flex-col gap-6">
@@ -52,7 +71,6 @@ export function ALaCarta({ state, dispatch, result }: ALaCartaProps) {
         </p>
       </div>
 
-      {/* --- Telemed Packages --- */}
       <Card>
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
@@ -81,7 +99,19 @@ export function ALaCarta({ state, dispatch, result }: ALaCartaProps) {
               />
             </div>
 
-            {/* Tabla de tiers editable */}
+            <div className="rounded-xl bg-primary/5 p-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-muted-foreground">Base calculada desde costo + markup + comisiones</p>
+                  <p className="text-sm font-semibold">{formatUSD(telemedBaseCalculado)}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs text-muted-foreground">Factor volumen aplicado</p>
+                  <p className="text-sm font-semibold">{(telemedFactorAplicado * 100).toFixed(0)}%</p>
+                </div>
+              </div>
+            </div>
+
             <div>
               <div className="flex items-center justify-between mb-2">
                 <Label className="text-xs text-muted-foreground">
@@ -92,7 +122,9 @@ export function ALaCarta({ state, dispatch, result }: ALaCartaProps) {
                         <Info className="h-3 w-3 inline ml-1 cursor-help" />
                       </TooltipTrigger>
                       <TooltipContent>
-                        <p className="text-xs">Define rangos de precios por volumen. El sistema selecciona automáticamente el tier correspondiente.</p>
+                        <p className="text-xs max-w-xs">
+                          El primer tier funciona como base de referencia. Los tiers siguientes aplican descuentos relativos sobre el precio calculado automáticamente.
+                        </p>
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
@@ -104,7 +136,13 @@ export function ALaCarta({ state, dispatch, result }: ALaCartaProps) {
                   onClick={() => {
                     const newTiers = [
                       ...alaCartaTelemed.tiers,
-                      { minQty: (alaCartaTelemed.tiers[alaCartaTelemed.tiers.length - 1]?.minQty || 0) + 100, precioUnitario: 10 },
+                      {
+                        minQty: (alaCartaTelemed.tiers[alaCartaTelemed.tiers.length - 1]?.minQty || 0) + 100,
+                        precioUnitario:
+                          alaCartaTelemed.tiers[alaCartaTelemed.tiers.length - 1]?.precioUnitario ||
+                          alaCartaTelemed.tiers[0]?.precioUnitario ||
+                          10,
+                      },
                     ]
                     dispatch({ type: 'SET_ALC_TELEMED_TIERS', payload: newTiers })
                   }}
@@ -118,62 +156,72 @@ export function ALaCarta({ state, dispatch, result }: ALaCartaProps) {
                 <TableHeader>
                   <TableRow>
                     <TableHead className="text-xs">Min. Cantidad</TableHead>
-                    <TableHead className="text-xs">Precio Unitario (USD)</TableHead>
+                    <TableHead className="text-xs">Referencia tier</TableHead>
+                    <TableHead className="text-xs">Factor</TableHead>
                     <TableHead className="text-xs w-10"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {alaCartaTelemed.tiers.map((tier, i) => (
-                    <TableRow key={i}>
-                      <TableCell>
-                        <Input
-                          type="number"
-                          min={0}
-                          value={tier.minQty}
-                          onChange={(e) => {
-                            const newTiers = [...alaCartaTelemed.tiers]
-                            newTiers[i] = { ...newTiers[i], minQty: parseInt(e.target.value) || 0 }
-                            dispatch({ type: 'SET_ALC_TELEMED_TIERS', payload: newTiers })
-                          }}
-                          className="h-8 text-xs"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          type="number"
-                          min={0}
-                          step={0.5}
-                          value={tier.precioUnitario}
-                          onChange={(e) => {
-                            const newTiers = [...alaCartaTelemed.tiers]
-                            newTiers[i] = { ...newTiers[i], precioUnitario: parseFloat(e.target.value) || 0 }
-                            dispatch({ type: 'SET_ALC_TELEMED_TIERS', payload: newTiers })
-                          }}
-                          className="h-8 text-xs"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        {alaCartaTelemed.tiers.length > 1 && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 w-7 p-0 text-destructive hover:text-destructive"
-                            onClick={() => {
-                              const newTiers = alaCartaTelemed.tiers.filter((_, j) => j !== i)
+                  {alaCartaTelemed.tiers.map((tier, i) => {
+                    const baseRef = alaCartaTelemed.tiers[0]?.precioUnitario || 1
+                    const factor = baseRef > 0 ? tier.precioUnitario / baseRef : 1
+                    return (
+                      <TableRow key={i}>
+                        <TableCell>
+                          <Input
+                            type="number"
+                            min={0}
+                            value={tier.minQty}
+                            onChange={(e) => {
+                              const newTiers = [...alaCartaTelemed.tiers]
+                              newTiers[i] = { ...newTiers[i], minQty: parseInt(e.target.value) || 0 }
                               dispatch({ type: 'SET_ALC_TELEMED_TIERS', payload: newTiers })
                             }}
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                            className="h-8 text-xs"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            type="number"
+                            min={0}
+                            step={0.01}
+                            value={tier.precioUnitario}
+                            onChange={(e) => {
+                              const newTiers = [...alaCartaTelemed.tiers]
+                              newTiers[i] = {
+                                ...newTiers[i],
+                                precioUnitario: parseFloat(e.target.value) || 0,
+                              }
+                              dispatch({ type: 'SET_ALC_TELEMED_TIERS', payload: newTiers })
+                            }}
+                            className="h-8 text-xs"
+                          />
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {(factor * 100).toFixed(0)}%
+                        </TableCell>
+                        <TableCell>
+                          {alaCartaTelemed.tiers.length > 1 && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                              onClick={() => {
+                                const newTiers = alaCartaTelemed.tiers.filter((_, j) => j !== i)
+                                dispatch({ type: 'SET_ALC_TELEMED_TIERS', payload: newTiers })
+                              }}
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
                 </TableBody>
               </Table>
             </div>
 
-            {/* Resumen */}
             <div className="rounded-xl bg-primary/5 p-3 flex items-center justify-between">
               <div>
                 <p className="text-xs text-muted-foreground">Precio unitario aplicado</p>
@@ -188,7 +236,6 @@ export function ALaCarta({ state, dispatch, result }: ALaCartaProps) {
         )}
       </Card>
 
-      {/* --- FaceScan Packages --- */}
       <Card>
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
@@ -217,31 +264,35 @@ export function ALaCarta({ state, dispatch, result }: ALaCartaProps) {
               />
             </div>
 
-            {/* Tabla de referencia de tiers */}
             <div>
               <Label className="text-xs text-muted-foreground mb-2 block">Tabla de precios por volumen</Label>
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead className="text-xs">Scans/Año</TableHead>
-                    <TableHead className="text-xs">Precio Venta (USD)</TableHead>
-                    <TableHead className="text-xs">Costo Base (USD)</TableHead>
+                    <TableHead className="text-xs">Precio base</TableHead>
+                    <TableHead className="text-xs">Precio cotizado</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {FACESCAN_TIERS.map((tier, i) => {
-                    const isActive = alaCartaFaceScan.scansAnuales >= tier.minScans &&
-                      (i === FACESCAN_TIERS.length - 1 || alaCartaFaceScan.scansAnuales < FACESCAN_TIERS[i + 1].minScans)
+                    const isActive =
+                      alaCartaFaceScan.scansAnuales >= tier.minScans &&
+                      (i === FACESCAN_TIERS.length - 1 ||
+                        alaCartaFaceScan.scansAnuales < FACESCAN_TIERS[i + 1].minScans)
+                    const quoted = getFaceScanQuotedUnitPrice(state, tier.minScans)
                     return (
                       <TableRow key={i} className={isActive ? 'bg-primary/5 font-medium' : ''}>
                         <TableCell className="text-xs">
                           {tier.minScans === 0 ? '1' : tier.minScans.toLocaleString()}+
-                          {isActive && <Badge variant="outline" className="ml-2 text-[10px] border-primary text-primary">Activo</Badge>}
+                          {isActive && (
+                            <Badge variant="outline" className="ml-2 text-[10px] border-primary text-primary">
+                              Activo
+                            </Badge>
+                          )}
                         </TableCell>
                         <TableCell className="text-xs">{formatUSD(tier.precioUnitario)}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
-                          {formatUSD(tier.precioUnitario / 2)}
-                        </TableCell>
+                        <TableCell className="text-xs">{formatUSD(quoted)}</TableCell>
                       </TableRow>
                     )
                   })}
@@ -249,10 +300,9 @@ export function ALaCarta({ state, dispatch, result }: ALaCartaProps) {
               </Table>
             </div>
 
-            {/* Resumen */}
             <div className="rounded-xl bg-primary/5 p-3 flex items-center justify-between">
               <div>
-                <p className="text-xs text-muted-foreground">Precio unitario (tier)</p>
+                <p className="text-xs text-muted-foreground">Precio unitario aplicado</p>
                 <p className="text-sm font-semibold">{formatUSD(result.faceScanUnitPrice)}</p>
               </div>
               <div className="text-right">
@@ -264,7 +314,6 @@ export function ALaCarta({ state, dispatch, result }: ALaCartaProps) {
         )}
       </Card>
 
-      {/* --- Zentis Licensing --- */}
       <Card>
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
@@ -292,29 +341,36 @@ export function ALaCarta({ state, dispatch, result }: ALaCartaProps) {
                 className="mt-1"
               />
               <p className="text-xs text-muted-foreground mt-1">
-                Precio por usuario: {formatUSD(getZentisTierPrice(alaCartaZentis.usuariosActivos))}
+                Precio base por usuario: {formatUSD(getZentisTierPrice(alaCartaZentis.usuariosActivos))} · Cotizado: {formatUSD(zentisAssistantUnit)}
               </p>
             </div>
 
-            {/* Tabla de referencia Zentis */}
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead className="text-xs">Usuarios</TableHead>
-                  <TableHead className="text-xs">Precio/Usuario/Mes</TableHead>
+                  <TableHead className="text-xs">Precio base</TableHead>
+                  <TableHead className="text-xs">Precio cotizado</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {ZENTIS_TIERS.map((tier, i) => {
-                  const isActive = alaCartaZentis.usuariosActivos >= tier.minUsers &&
+                  const isActive =
+                    alaCartaZentis.usuariosActivos >= tier.minUsers &&
                     alaCartaZentis.usuariosActivos <= tier.maxUsers
+                  const quoted = getZentisQuotedUnitPrice(state, tier.minUsers)
                   return (
                     <TableRow key={i} className={isActive ? 'bg-primary/5 font-medium' : ''}>
                       <TableCell className="text-xs">
                         {tier.minUsers}–{tier.maxUsers === Infinity ? '...' : tier.maxUsers}
-                        {isActive && <Badge variant="outline" className="ml-2 text-[10px] border-primary text-primary">Activo</Badge>}
+                        {isActive && (
+                          <Badge variant="outline" className="ml-2 text-[10px] border-primary text-primary">
+                            Activo
+                          </Badge>
+                        )}
                       </TableCell>
                       <TableCell className="text-xs">{formatUSD(tier.precioUsuario)}</TableCell>
+                      <TableCell className="text-xs">{formatUSD(quoted)}</TableCell>
                     </TableRow>
                   )
                 })}
@@ -323,14 +379,15 @@ export function ALaCarta({ state, dispatch, result }: ALaCartaProps) {
 
             <Separator />
 
-            {/* Módulos opcionales */}
             <div className="flex flex-col gap-3">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Módulos Opcionales</p>
 
               <div className="flex items-center justify-between">
                 <div>
                   <Label className="text-sm">Zentis para Imágenes</Label>
-                  <p className="text-xs text-muted-foreground">{formatUSD(ZENTIS_IMAGENES_PRECIO)}/usuario/mes</p>
+                  <p className="text-xs text-muted-foreground">
+                    Base: {formatUSD(ZENTIS_IMAGENES_PRECIO)} · Cotizado: {formatUSD(zentisImagenesUnit)}/usuario/mes
+                  </p>
                 </div>
                 <Switch
                   checked={alaCartaZentis.zentisImagenes}
@@ -355,7 +412,9 @@ export function ALaCarta({ state, dispatch, result }: ALaCartaProps) {
               <div className="flex items-center justify-between">
                 <div>
                   <Label className="text-sm">Transcripción de consultas</Label>
-                  <p className="text-xs text-muted-foreground">{formatUSD(ZENTIS_TRANSCRIPCION_PRECIO)}/transcripción</p>
+                  <p className="text-xs text-muted-foreground">
+                    Base: {formatUSD(ZENTIS_TRANSCRIPCION_PRECIO)} · Cotizado: {formatUSD(zentisTranscripcionUnit)}/transcripción
+                  </p>
                 </div>
                 <Switch
                   checked={alaCartaZentis.transcripciones}
@@ -405,7 +464,6 @@ export function ALaCarta({ state, dispatch, result }: ALaCartaProps) {
 
             <Separator />
 
-            {/* Resumen Zentis */}
             <div className="rounded-xl bg-primary/5 p-3">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs text-muted-foreground">Assistant</span>
@@ -433,7 +491,6 @@ export function ALaCarta({ state, dispatch, result }: ALaCartaProps) {
         )}
       </Card>
 
-      {/* Resumen total a la carta */}
       {result.totalMensual > 0 && (
         <Card className="border-primary/20">
           <CardContent className="pt-4">

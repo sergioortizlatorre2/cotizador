@@ -30,6 +30,7 @@ import { Building2, Settings2, DollarSign, Percent, Info, Zap } from 'lucide-rea
 import type { QuoteState, Segmento, IncidenciaPreset, QuoteMode } from '@/lib/cotizador/types'
 import type { QuoteAction } from '@/lib/cotizador/store'
 import { INCIDENCIA_PRESETS } from '@/lib/cotizador/constants'
+import { useRole } from '../../lib/auth/useRole'
 
 interface PanelControlProps {
   state: QuoteState
@@ -41,7 +42,6 @@ function normalizeIncidence(value: number) {
   return value > 1 ? value / 100 : value
 }
 
-/** Tooltip inline para campos avanzados */
 function FieldTip({ text }: { text: string }) {
   return (
     <TooltipProvider>
@@ -57,7 +57,6 @@ function FieldTip({ text }: { text: string }) {
   )
 }
 
-/** Switch con label inline */
 function ToggleField({
   label,
   checked,
@@ -80,13 +79,13 @@ function ToggleField({
   )
 }
 
-/** Panel de Control (Inputs) */
 export function PanelControl({ state, dispatch }: PanelControlProps) {
   const { contrato, planDesign, costosBase, preciosComisiones } = state
+  const role = useRole()
+  const canSeeInternalPricing = role === 'admin'
 
   const isActuarial = contrato.segmento === 'municipio' || contrato.segmento === 'cooperativa'
 
-  // Inputs numéricos "en vivo" (evita 0300 y actualiza cotización al tipear)
   const [poblacionDraft, setPoblacionDraft] = React.useState(() => String(contrato.poblacion ?? 0))
   const [duracionDraft, setDuracionDraft] = React.useState(() => String(contrato.duracionMeses ?? 1))
 
@@ -103,7 +102,6 @@ export function PanelControl({ state, dispatch }: PanelControlProps) {
     return digits.replace(/^0+(?=\d)/, '')
   }
 
-  // Encontrar el preset de incidencia actual
   const currentPreset = (Object.entries(INCIDENCIA_PRESETS) as [IncidenciaPreset, number][])
     .find(([, raw]) => {
       const v = normalizeIncidence(raw)
@@ -112,7 +110,6 @@ export function PanelControl({ state, dispatch }: PanelControlProps) {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Modo de cotización */}
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="flex items-center gap-2 text-sm">
@@ -133,15 +130,12 @@ export function PanelControl({ state, dispatch }: PanelControlProps) {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="PLANES">Planes (por cápita) + Paquetes opcionales</SelectItem>
-              <SelectItem value="SOLO_PAQUETES">
-                Solo Paquetes (Telemed / FaceScan / Zentis)
-              </SelectItem>
+              <SelectItem value="SOLO_PAQUETES">Solo Paquetes (Telemed / FaceScan / Zentis)</SelectItem>
             </SelectContent>
           </Select>
         </CardContent>
       </Card>
 
-      {/* A) Contrato y Cliente (primero) */}
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="flex items-center gap-2 text-sm">
@@ -240,7 +234,7 @@ export function PanelControl({ state, dispatch }: PanelControlProps) {
             label="Reserva"
             checked={contrato.reservaEnabled}
             onChange={(v) => dispatch({ type: 'SET_RESERVA_ENABLED', payload: v })}
-            tip="Fondo de reserva prorrateado mensualmente (N meses distribuidos en toda la duración del contrato)."
+            tip="Fondo de reserva prorrateado mensualmente."
           />
           {contrato.reservaEnabled && (
             <div>
@@ -268,7 +262,6 @@ export function PanelControl({ state, dispatch }: PanelControlProps) {
         </CardContent>
       </Card>
 
-      {/* Presets */}
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="flex items-center gap-2 text-sm">
@@ -287,11 +280,6 @@ export function PanelControl({ state, dispatch }: PanelControlProps) {
                     variant={currentPreset === name ? 'default' : 'outline'}
                     className="cursor-pointer capitalize text-xs"
                     onClick={() => dispatch({ type: 'SET_INCIDENCIA', payload: value })}
-                    title={
-                      isActuarial
-                        ? 'Define el % de población facturable (actuarial)'
-                        : 'Define la incidencia de uso (vidas activas)'
-                    }
                   >
                     {name} ({(value * 100).toFixed(0)}%)
                   </Badge>
@@ -303,20 +291,17 @@ export function PanelControl({ state, dispatch }: PanelControlProps) {
           <p className="text-[11px] text-muted-foreground leading-snug">
             {isActuarial ? (
               <>
-                En <b>Municipio/Cooperativa</b>, el preset define el <b>% de población facturable</b> (base actuarial).
-                Se factura sobre ese porcentaje, no sobre el total de vidas.
+                En <b>Municipio/Cooperativa</b>, el preset define el <b>% de población facturable</b>. Se factura sobre ese porcentaje, no sobre el total de vidas.
               </>
             ) : (
               <>
-                En <b>Empresa</b>, el preset define la <b>incidencia de uso</b> (vidas activas). La facturación se hace
-                sobre el total de vidas de la empresa.
+                En <b>Empresa</b>, el preset define la <b>incidencia de uso</b>. La facturación se hace sobre el total de vidas.
               </>
             )}
           </p>
         </CardContent>
       </Card>
 
-      {/* B) Diseño del Plan */}
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="flex items-center gap-2 text-sm">
@@ -329,7 +314,7 @@ export function PanelControl({ state, dispatch }: PanelControlProps) {
             <div>
               <Label className="text-xs text-muted-foreground">
                 Telemed incluido/vida/mes
-                <FieldTip text="Cantidad incluida por vida activa/mes (impacta el costo). El vendedor puede definir el plan base aquí." />
+                <FieldTip text="Cantidad incluida por vida activa/mes." />
               </Label>
               <Input
                 type="number"
@@ -337,10 +322,7 @@ export function PanelControl({ state, dispatch }: PanelControlProps) {
                 step={0.1}
                 value={planDesign.telemedIncluidoPorVida}
                 onChange={(e) =>
-                  dispatch({
-                    type: 'SET_TELEMED_INCLUIDO',
-                    payload: parseFloat(e.target.value) || 0,
-                  })
+                  dispatch({ type: 'SET_TELEMED_INCLUIDO', payload: parseFloat(e.target.value) || 0 })
                 }
                 className="mt-1"
               />
@@ -348,7 +330,7 @@ export function PanelControl({ state, dispatch }: PanelControlProps) {
             <div>
               <Label className="text-xs text-muted-foreground">
                 FaceScan incluido/vida/mes
-                <FieldTip text="Cantidad incluida por vida activa/mes (impacta el costo)." />
+                <FieldTip text="Cantidad incluida por vida activa/mes." />
               </Label>
               <Input
                 type="number"
@@ -356,10 +338,7 @@ export function PanelControl({ state, dispatch }: PanelControlProps) {
                 step={0.1}
                 value={planDesign.faceScanIncluidoPorVida}
                 onChange={(e) =>
-                  dispatch({
-                    type: 'SET_FACESCAN_INCLUIDO',
-                    payload: parseFloat(e.target.value) || 0,
-                  })
+                  dispatch({ type: 'SET_FACESCAN_INCLUIDO', payload: parseFloat(e.target.value) || 0 })
                 }
                 className="mt-1"
               />
@@ -368,19 +347,10 @@ export function PanelControl({ state, dispatch }: PanelControlProps) {
 
           <div>
             <Label className="text-xs text-muted-foreground">
-              {isActuarial ? (
-                <>
-                  Población facturable: {(planDesign.incidenciaMensual * 100).toFixed(0)}%
-                  <FieldTip text="En Municipio/Cooperativa este % define cuánta población se factura (base actuarial)." />
-                </>
-              ) : (
-                <>
-                  Incidencia mensual (uso): {(planDesign.incidenciaMensual * 100).toFixed(0)}%
-                  <FieldTip text="En Empresa este % define cuántas vidas activas usarán el servicio (impacta costo). Se factura igual sobre todas las vidas." />
-                </>
-              )}
+              {isActuarial
+                ? `Población facturable: ${(planDesign.incidenciaMensual * 100).toFixed(0)}%`
+                : `Incidencia mensual (uso): ${(planDesign.incidenciaMensual * 100).toFixed(0)}%`}
             </Label>
-
             <Slider
               min={0.01}
               max={0.4}
@@ -407,10 +377,7 @@ export function PanelControl({ state, dispatch }: PanelControlProps) {
                     min={1}
                     value={planDesign.scansPorEvento}
                     onChange={(e) =>
-                      dispatch({
-                        type: 'SET_SCANS_POR_EVENTO',
-                        payload: parseInt(e.target.value) || 1,
-                      })
+                      dispatch({ type: 'SET_SCANS_POR_EVENTO', payload: parseInt(e.target.value) || 1 })
                     }
                     className="mt-1"
                   />
@@ -421,7 +388,6 @@ export function PanelControl({ state, dispatch }: PanelControlProps) {
         </CardContent>
       </Card>
 
-      {/* C) Costos Base (enmascarados) */}
       <Accordion type="single" collapsible>
         <AccordionItem value="costos" className="border rounded-xl overflow-hidden">
           <Card className="border-0 shadow-none">
@@ -469,10 +435,7 @@ export function PanelControl({ state, dispatch }: PanelControlProps) {
                     step={0.1}
                     value={costosBase.mantenimientoPorVida}
                     onChange={(e) =>
-                      dispatch({
-                        type: 'SET_COSTO_MANTENIMIENTO',
-                        payload: parseFloat(e.target.value) || 0,
-                      })
+                      dispatch({ type: 'SET_COSTO_MANTENIMIENTO', payload: parseFloat(e.target.value) || 0 })
                     }
                     className="mt-1"
                   />
@@ -480,7 +443,6 @@ export function PanelControl({ state, dispatch }: PanelControlProps) {
                 <div>
                   <Label className="text-xs text-muted-foreground">
                     Médico capitado / vida / mes
-                    <FieldTip text="Solo aplica a planes PLUS y FULL." />
                   </Label>
                   <Input
                     type="number"
@@ -496,7 +458,6 @@ export function PanelControl({ state, dispatch }: PanelControlProps) {
                 <div>
                   <Label className="text-xs text-muted-foreground">
                     Accidentes Personales (AP) / vida / mes
-                    <FieldTip text="Solo aplica al plan FULL." />
                   </Label>
                   <Input
                     type="number"
@@ -515,101 +476,101 @@ export function PanelControl({ state, dispatch }: PanelControlProps) {
         </AccordionItem>
       </Accordion>
 
-      {/* D) Precios y Comisiones */}
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2 text-sm">
-            <Percent className="h-4 w-4 text-primary" />
-            Precios y Comisiones
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          <div className="grid grid-cols-2 gap-3">
+      {canSeeInternalPricing && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <Percent className="h-4 w-4 text-primary" />
+              Precios y Comisiones
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs text-muted-foreground">
+                  Markup CORE
+                  <FieldTip text="Multiplicador sobre el costo CORE para generar precio." />
+                </Label>
+                <Input
+                  type="number"
+                  min={1}
+                  step={0.1}
+                  value={preciosComisiones.markupCore}
+                  onChange={(e) =>
+                    dispatch({ type: 'SET_MARKUP_CORE', payload: parseFloat(e.target.value) || 1 })
+                  }
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground">Margen AP (%)</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={Math.round(preciosComisiones.margenAP * 100)}
+                  onChange={(e) =>
+                    dispatch({
+                      type: 'SET_MARGEN_AP',
+                      payload: (parseFloat(e.target.value) || 0) / 100,
+                    })
+                  }
+                  className="mt-1"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs text-muted-foreground">Comisión Ventas (%)</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={50}
+                  value={Math.round(preciosComisiones.comisionVentas * 100)}
+                  onChange={(e) =>
+                    dispatch({
+                      type: 'SET_COMISION_VENTAS',
+                      payload: (parseFloat(e.target.value) || 0) / 100,
+                    })
+                  }
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground">Comisión Firmante (%)</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={50}
+                  value={Math.round(preciosComisiones.comisionSigner * 100)}
+                  onChange={(e) =>
+                    dispatch({
+                      type: 'SET_COMISION_SIGNER',
+                      payload: (parseFloat(e.target.value) || 0) / 100,
+                    })
+                  }
+                  className="mt-1"
+                />
+              </div>
+            </div>
+
             <div>
               <Label className="text-xs text-muted-foreground">
-                Markup CORE
-                <FieldTip text="Multiplicador sobre el costo CORE para generar precio. Ej: 2.5x = precio 2.5 veces el costo." />
+                Descuento Comercial: {(preciosComisiones.descuentoComercial * 100).toFixed(0)}%
               </Label>
-              <Input
-                type="number"
-                min={1}
-                step={0.1}
-                value={preciosComisiones.markupCore}
-                onChange={(e) =>
-                  dispatch({ type: 'SET_MARKUP_CORE', payload: parseFloat(e.target.value) || 1 })
-                }
-                className="mt-1"
-              />
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground">Margen AP (%)</Label>
-              <Input
-                type="number"
+              <Slider
                 min={0}
-                max={100}
-                value={Math.round(preciosComisiones.margenAP * 100)}
-                onChange={(e) =>
-                  dispatch({
-                    type: 'SET_MARGEN_AP',
-                    payload: (parseFloat(e.target.value) || 0) / 100,
-                  })
-                }
-                className="mt-1"
+                max={0.3}
+                step={0.01}
+                value={[preciosComisiones.descuentoComercial]}
+                onValueChange={([v]) => dispatch({ type: 'SET_DESCUENTO_COMERCIAL', payload: v })}
+                className="mt-2"
               />
             </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="text-xs text-muted-foreground">Comisión Ventas (%)</Label>
-              <Input
-                type="number"
-                min={0}
-                max={50}
-                value={Math.round(preciosComisiones.comisionVentas * 100)}
-                onChange={(e) =>
-                  dispatch({
-                    type: 'SET_COMISION_VENTAS',
-                    payload: (parseFloat(e.target.value) || 0) / 100,
-                  })
-                }
-                className="mt-1"
-              />
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground">Comisión Firmante (%)</Label>
-              <Input
-                type="number"
-                min={0}
-                max={50}
-                value={Math.round(preciosComisiones.comisionSigner * 100)}
-                onChange={(e) =>
-                  dispatch({
-                    type: 'SET_COMISION_SIGNER',
-                    payload: (parseFloat(e.target.value) || 0) / 100,
-                  })
-                }
-                className="mt-1"
-              />
-            </div>
-          </div>
-
-          <div>
-            <Label className="text-xs text-muted-foreground">
-              Descuento Comercial: {(preciosComisiones.descuentoComercial * 100).toFixed(0)}%
-              <FieldTip text="Descuento aplicado al precio final. Las comisiones se recalculan sobre el precio con descuento." />
-            </Label>
-            <Slider
-              min={0}
-              max={0.3}
-              step={0.01}
-              value={[preciosComisiones.descuentoComercial]}
-              onValueChange={([v]) => dispatch({ type: 'SET_DESCUENTO_COMERCIAL', payload: v })}
-              className="mt-2"
-            />
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }
