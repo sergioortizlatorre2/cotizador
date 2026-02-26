@@ -238,6 +238,7 @@ export default function CotizadorPage() {
           </aside>
         </div>
       </main>
+      
     </div>
   )
 }
